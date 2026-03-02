@@ -1,0 +1,165 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2e2e36 transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #2e2e36;
+    border-radius: 3px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: #3f3f46;
+  }
+
+  ::selection {
+    background: #00ed6433;
+    color: #fafafa;
+  }
+
+  input, textarea {
+    outline: none;
+  }
+
+  body {
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  #root {
+    height: 100vh;
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  .glass {
+    background: rgba(15, 15, 18, 0.8);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .glow-border {
+    position: relative;
+  }
+
+  .glow-border::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, #00ed6433, transparent 50%, #00ed6411);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .noise-bg {
+    position: relative;
+  }
+
+  .noise-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .json-key { color: #7dd3fc; }
+  .json-string { color: #86efac; }
+  .json-number { color: #fbbf24; }
+  .json-boolean { color: #c084fc; }
+  .json-null { color: #6b7280; font-style: italic; }
+  .json-bracket { color: #a1a1aa; }
+  .json-comma { color: #52525b; }
+  .json-objectid { color: #f472b6; }
+
+  .shimmer-line {
+    background: linear-gradient(90deg, #1c1c21 0%, #2e2e36 50%, #1c1c21 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s linear infinite;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-accent text-surface-0 font-semibold rounded-lg
+           hover:bg-accent-dim transition-all duration-150
+           active:scale-[0.97] text-sm;
+  }
+
+  .btn-ghost {
+    @apply px-3 py-1.5 text-text-secondary hover:text-text-primary
+           hover:bg-surface-3 rounded-lg transition-all duration-150
+           active:scale-[0.97] text-sm;
+  }
+
+  .input-field {
+    @apply w-full bg-surface-2 border border-border rounded-lg pl-5 pr-3 py-2
+           text-text-primary placeholder-text-tertiary text-sm font-mono
+           focus:border-accent/40 focus:ring-1 focus:ring-accent/20
+           transition-all duration-150;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium;
+  }
+
+  .badge-green {
+    @apply badge bg-emerald-500/10 text-emerald-400 border border-emerald-500/20;
+  }
+
+  .badge-yellow {
+    @apply badge bg-amber-500/10 text-amber-400 border border-amber-500/20;
+  }
+
+  .badge-blue {
+    @apply badge bg-blue-500/10 text-blue-400 border border-blue-500/20;
+  }
+
+  .badge-purple {
+    @apply badge bg-purple-500/10 text-purple-400 border border-purple-500/20;
+  }
+
+  .badge-red {
+    @apply badge bg-red-500/10 text-red-400 border border-red-500/20;
+  }
+}
+
+@keyframes float-in {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.float-in {
+  animation: float-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.float-in-delay-1 { animation-delay: 0.05s; }
+.float-in-delay-2 { animation-delay: 0.1s; }
+.float-in-delay-3 { animation-delay: 0.15s; }
+.float-in-delay-4 { animation-delay: 0.2s; }
