@@ -55,7 +55,7 @@ Open **http://localhost:3141** and paste your connection string.
 
 ```bash
 # Clone repository
-git clone https://github.com/beztebya666/MongoStudio.git
+git clone https://github.com/beztebya666/mongostudio.git
 cd MongoStudio
 
 # Build image
