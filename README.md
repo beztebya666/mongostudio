@@ -25,13 +25,43 @@ MongoStudio is a lightweight, stunning MongoDB GUI that runs in a single Docker 
 - **🔒 Secure** — Helmet.js, non-root container, no data stored server-side
 - **📦 Lightweight** — ~50MB Docker image, minimal dependencies
 
-## Quick Start
+## 🚀 Quick Start
+
+#### 🔹 Option 1 — Pull from Docker Hub (Recommended)
 
 ```bash
-# Build
+# Pull image
+docker pull beztebya666/mongostudio:latest
+
+# Run container
+docker run -d -p 3141:3141 --name mongostudio beztebya666/mongostudio:latest
+```
+
+Open **http://localhost:3141** and paste your connection string.
+
+#### 🔹 Option 2 — Pull from GitHub Container Registry (GHCR)
+
+```bash
+# Pull image
+docker pull ghcr.io/beztebya666/mongostudio:latest
+
+# Run container
+docker run -d -p 3141:3141 --name mongostudio ghcr.io/beztebya666/mongostudio:latest
+```
+
+Open **http://localhost:3141** and paste your connection string.
+
+#### 🔹 Option 3 — Build Locally
+
+```bash
+# Clone repository
+git clone https://github.com/beztebya666/MongoStudio.git
+cd MongoStudio
+
+# Build image
 docker build -t mongostudio .
 
-# Run
+# Run container
 docker run -d -p 3141:3141 --name mongostudio mongostudio
 ```
 
