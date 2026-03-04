@@ -7,69 +7,45 @@ export function formatBytes(bytes) {
 }
 
 export function formatNumber(num) {
-  if (num === undefined || num === null) return '—';
-  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
-  if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
-  return num.toLocaleString();
+  if (num === null || num === undefined) return '0';
+  return num.toLocaleString('en-US');
 }
 
 export function formatDuration(ms) {
   if (ms < 1) return '<1ms';
-  if (ms < 1000) return Math.round(ms) + 'ms';
-  return (ms / 1000).toFixed(2) + 's';
-}
-
-export function timeAgo(date) {
-  const seconds = Math.floor((Date.now() - new Date(date)) / 1000);
-  if (seconds < 60) return 'just now';
-  if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
-  if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
-  return Math.floor(seconds / 86400) + 'd ago';
-}
-
-export function getTypeColor(value) {
-  if (value === null || value === undefined) return 'json-null';
-  if (typeof value === 'string') return 'json-string';
-  if (typeof value === 'number') return 'json-number';
-  if (typeof value === 'boolean') return 'json-boolean';
-  if (Array.isArray(value)) return 'json-bracket';
-  if (typeof value === 'object') {
-    if (value.$oid) return 'json-objectid';
-    return 'json-bracket';
-  }
-  return 'text-text-secondary';
-}
-
-export function getTypeBadge(value) {
-  if (value === null) return { label: 'null', cls: 'badge-purple' };
-  if (value === undefined) return { label: 'undefined', cls: 'badge-purple' };
-  if (typeof value === 'string') return { label: 'str', cls: 'badge-green' };
-  if (typeof value === 'number') return { label: 'num', cls: 'badge-yellow' };
-  if (typeof value === 'boolean') return { label: 'bool', cls: 'badge-purple' };
-  if (Array.isArray(value)) return { label: `arr[${value.length}]`, cls: 'badge-blue' };
-  if (typeof value === 'object') {
-    if (value.$oid) return { label: 'ObjectId', cls: 'badge-red' };
-    if (value.$date) return { label: 'Date', cls: 'badge-yellow' };
-    return { label: 'obj', cls: 'badge-blue' };
-  }
-  return { label: typeof value, cls: 'badge-purple' };
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const min = Math.floor(ms / 60000);
+  const sec = Math.round((ms % 60000) / 1000);
+  if (min < 60) return `${min}m ${sec}s`;
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  if (hr < 24) return `${hr}h ${remMin}m`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ${hr % 24}h`;
 }
 
 export function truncateId(id) {
-  if (!id) return '';
-  const s = typeof id === 'object' ? (id.$oid || JSON.stringify(id)) : String(id);
-  if (s.length <= 12) return s;
-  return s.slice(0, 6) + '…' + s.slice(-4);
+  if (id === null || id === undefined) return '—';
+  const str = typeof id === 'object' ? (id.$oid || JSON.stringify(id)) : String(id);
+  if (str.length <= 12) return str;
+  return str.slice(0, 6) + '…' + str.slice(-4);
+}
+
+export function prettyJson(obj) {
+  try { return JSON.stringify(obj, null, 2); }
+  catch { return String(obj); }
 }
 
 export function safeJsonParse(str) {
-  try {
-    return { data: JSON.parse(str), error: null };
-  } catch (e) {
-    return { data: null, error: e.message };
-  }
+  try { return { value: JSON.parse(str), error: null }; }
+  catch (e) { return { value: null, error: e.message }; }
 }
 
-export function prettyJson(obj, indent = 2) {
-  return JSON.stringify(obj, null, indent);
+export function getTypeBadge(val) {
+  if (val === null) return 'null';
+  if (Array.isArray(val)) return 'array';
+  if (val && typeof val === 'object' && val.$oid) return 'ObjectId';
+  if (val && typeof val === 'object' && val.$date) return 'Date';
+  return typeof val;
 }

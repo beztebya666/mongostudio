@@ -1,187 +1,54 @@
-<div align="center">
+# ⚡ MongoStudio v2.0.0
 
-# ⚡ MongoStudio
+Blazing-fast MongoDB GUI with dark/light themes, execution safety, and full CRUD.
 
-**A blazing-fast, beautiful MongoDB UI**
+## What's New in v2.0
 
-Modern • Minimal • Open Source
+### Core Features
+- **Advanced Connection Config** — TLS, authSource, replicaSet, SRV, directConnection, readPreference
+- **Execution Safety** — Safe/Power mode, maxTimeMS, query limits, rate limiting, $where blocking
+- **Explain Integration** — Query plan visualization, index usage, collection scan detection
+- **Query History** — Last 50 queries with timing, replay, slow query detection
+- **Cancel Query** — Abort running queries with live execution timer
+- **Schema Preview** — Sample-based field analyzer with type distribution
+- **Connection Profiles** — Save/load connection configurations
+- **Production Warning Banner** — Auto-detected, always visible
+- **Error Classification** — Auth, network, TLS, timeout, permission errors with friendly messages
 
-![License](https://img.shields.io/badge/license-MIT-00ed64)
-![Docker](https://img.shields.io/badge/docker-ready-blue)
-![MongoDB](https://img.shields.io/badge/MongoDB-2.6_→_8.x-green)
+### UI Enhancements
+- **Dark/Light Theme** — Toggle with full CSS variable system
+- **Table View** — Switch between JSON and table document views
+- **Export Data** — JSON and CSV export with filters
+- **Sidebar CRUD** — Create/drop databases and collections directly
+- **Index Manager** — Create with options (unique, sparse, compound) / drop indexes
+- **Settings Modal** — Execution config, server info, health metrics
+- **Result Size Indicator** — KB size of query results
+- **Health/Cluster Info Panel** — Server status, uptime, connections, opcounters
 
-</div>
+### Backend
+- `POST /api/databases` — Create database
+- `DELETE /api/databases/:db` — Drop database
+- `POST /api/databases/:db/collections` — Create collection
+- `DELETE /api/databases/:db/collections/:col` — Drop collection
+- `GET /api/.../schema` — Schema analysis (sample-based)
+- `POST /api/.../explain` — Query explain with summary
+- `POST /api/.../export` — JSON/CSV export
+- `GET/PUT /api/execution-config` — Safe/Power mode config
+- `GET /api/health` — Health check
+- `GET /api/metrics` — Server metrics
+- `GET /api/audit` — Audit log (per session)
+- `GET /api/status` — Full server status
 
----
-
-## Why MongoStudio?
-
-MongoStudio is a lightweight, stunning MongoDB GUI that runs in a single Docker container. Connect with just a connection string and start browsing your data instantly.
-
-- **⚡ Blazing Fast** — Sub-100ms query rendering, zero bloat
-- **🎨 Beautiful UI** — Dark, minimal design inspired by Linear & Vercel
-- **🐳 Single Docker Container** — One command to deploy, runs anywhere
-- **🔄 MongoDB 3.6 → 8.x** — Auto-detects version, adapts API calls automatically
-- **🔒 Secure** — Helmet.js, non-root container, no data stored server-side
-- **📦 Lightweight** — ~50MB Docker image, minimal dependencies
-
-## 🚀 Quick Start
-
-#### 🔹 Option 1 — Pull from Docker Hub (Recommended)
-
-```bash
-# Pull image
-docker pull beztebya666/mongostudio:latest
-
-# Run container
-docker run -d -p 3141:3141 --name mongostudio beztebya666/mongostudio:latest
-```
-
-Open **http://localhost:3141** and paste your connection string.
-
-#### 🔹 Option 2 — Pull from GitHub Container Registry (GHCR)
-
-```bash
-# Pull image
-docker pull ghcr.io/beztebya666/mongostudio:latest
-
-# Run container
-docker run -d -p 3141:3141 --name mongostudio ghcr.io/beztebya666/mongostudio:latest
-```
-
-Open **http://localhost:3141** and paste your connection string.
-
-#### 🔹 Option 3 — Build Locally
-
-```bash
-# Clone repository
-git clone https://github.com/beztebya666/mongostudio.git
-cd MongoStudio
-
-# Build image
-docker build -t mongostudio .
-
-# Run container
-docker run -d -p 3141:3141 --name mongostudio mongostudio
-```
-
-Open **http://localhost:3141** and paste your connection string.
-
-### Connecting to localhost MongoDB
-
-If MongoDB runs on your host machine:
-
-```bash
-# Linux
-docker run -d -p 3141:3141 --add-host=host.docker.internal:host-gateway mongostudio
-# Then connect with: mongodb://host.docker.internal:27017
-
-# macOS / Windows — works automatically
-docker run -d -p 3141:3141 mongostudio
-# Connect with: mongodb://host.docker.internal:27017
-```
-
-### Custom port
-
-```bash
-docker run -d -p 8080:3141 mongostudio
-# Open http://localhost:8080
-```
-
-### Production recommended flags
-
-```bash
-docker run -d \
-  -p 3141:3141 \
-  --name mongostudio \
-  --restart unless-stopped \
-  --memory 512m \
-  --cpus 1 \
-  mongostudio
-```
-
-## MongoDB Version Compatibility
-
-MongoStudio auto-detects your MongoDB server version on connect and adapts its behavior:
-
-| MongoDB Version | Support Level | Notes |
-|-----------------|---------------|-------|
-| **8.x** | ✅ Full | All features |
-| **7.x** | ✅ Full | All features |
-| **6.x** | ✅ Full | All features |
-| **5.x** | ✅ Full | All features |
-| **4.4** | ✅ Full | All features |
-| **4.2** | ✅ Full | `$unionWith` unavailable |
-| **4.0** | ✅ Full | `$merge`, `$unionWith` unavailable |
-| **3.6** | ⚡ Good | Uses legacy `count()`, no transactions |
-| **< 3.6** | ❌ | Upgrade required (driver limitation) |
-
-The UI shows a version badge and warnings banner when connected to older versions.
-
-### How version detection works
-
-1. On connect, MongoStudio runs `buildInfo` to get the exact version
-2. If that fails (restricted permissions), it falls back to wire protocol version detection via `hello` / `isMaster`
-3. A capabilities matrix is built and stored for the session
-4. Every API call uses version-appropriate methods (e.g., `countDocuments()` on 3.6+, legacy `count()` on older)
-5. Aggregation pipeline stages are pre-checked against version before execution
-
-## Features
-
-### Database Explorer
-Browse all databases and collections in a resizable sidebar with instant search filtering.
-
-### Document Browser
-Paginated documents with expandable JSON rows, syntax highlighting, inline edit/delete, MongoDB query filter bar.
-
-### Query Console
-Shell-style syntax (`db.collection.find({})`, `.aggregate([])`, `.distinct()`), query templates, execution time tracking, aggregation pipeline support with version-aware warnings.
-
-### Index Manager
-View, create, and drop indexes. Shows unique/sparse/TTL properties. Validates wildcard indexes against server version.
-
-### Document Editor
-Full JSON editor with line numbers, tab indentation, keyboard shortcuts (⌘+Enter to save, Esc to cancel), syntax validation.
-
-## Architecture
-
-```
-mongostudio/
-├── server/index.js      # Express API + MongoDB compat layer
-├── src/                  # React 18 frontend
-│   ├── components/       # UI components
-│   ├── utils/            # API client, formatters
-│   └── index.css         # Tailwind + custom styles
-├── Dockerfile            # Multi-stage production build
-└── package.json
-```
-
-**Backend**: Express.js + native MongoDB driver. Version-aware compat layer handles API differences across MongoDB 2.6–8.x.
-
-**Frontend**: React 18 + Vite + Tailwind CSS. Instant builds, tree-shaken, <200KB gzipped.
-
-## Local Development
+## Quick Start
 
 ```bash
 npm install
 npm run dev
-# Frontend: http://localhost:5173
-# Backend:  http://localhost:3141
+# → http://localhost:5173
 ```
 
-## Environment Variables
+## Stack
+React 18 · Vite 5 · Express 4 · MongoDB Driver 5 · Tailwind CSS 3
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3141` | Server port |
-| `NODE_ENV` | `development` | Set to `production` in Docker |
-
-## License
-
-MIT — use it however you want.
-
----
-
-<div align="center">
-  <sub>Built with ⚡ for the open source community</sub>
-</div>
+## Compatibility
+MongoDB 3.6 → 8.x · Atlas & Self-hosted · Auto-detect version with capability matrix
