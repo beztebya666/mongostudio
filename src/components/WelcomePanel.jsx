@@ -11,7 +11,7 @@ function formatHostDisplay(host) {
   return `${parts[0]}, ${parts[1]} +${parts.length - 2} more`;
 }
 
-const DB_STATS_EAGER_LIMIT = 40;
+const DB_STATS_CONCURRENCY = 3;
 const DEFAULT_WELCOME_HINTS = { readPrefPrimary: false };
 
 function loadWelcomeHintsState(key) {
@@ -57,7 +57,7 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
       return undefined;
     }
 
-    const targets = databases.slice(0, Math.min(databases.length, DB_STATS_EAGER_LIMIT)).map((db) => db.name);
+    const targets = databases.map((db) => db.name);
     const targetSet = new Set(targets);
 
     setDbStats((prev) => {
@@ -77,7 +77,7 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
     setDbStatsProgress({ loaded: 0, total: targets.length });
 
     const queue = targets.map((name) => ({ dbName: name, attempt: 0 }));
-    const workerCount = Math.min(3, queue.length);
+    const workerCount = Math.min(DB_STATS_CONCURRENCY, queue.length);
     let completed = 0;
 
     const runWorker = async () => {
