@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../utils/api';
-import { Layers, Loader, Refresh, Hash, AlertCircle } from './Icons';
+import { Layers, Loader, Refresh, Hash, AlertCircle, ArrowUp, ArrowDown } from './Icons';
 
 export default function SchemaView({ db, collection, refreshToken = 0 }) {
   const [schema, setSchema] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [sampleSize, setSampleSize] = useState(100);
+  const [sortState, setSortState] = useState({ key: 'coverage', dir: 'desc' });
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -27,6 +28,34 @@ export default function SchemaView({ db, collection, refreshToken = 0 }) {
     return map[type] || 'var(--text-secondary)';
   };
 
+  const toggleSort = (key) => {
+    setSortState((prev) => {
+      if (prev.key === key) return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+      return { key, dir: key === 'field' ? 'asc' : 'desc' };
+    });
+  };
+
+  const sortedFields = useMemo(() => {
+    const fields = [...(schema?.fields || [])];
+    const dir = sortState.dir === 'asc' ? 1 : -1;
+    const getPrimaryType = (field) => field.types?.[0]?.type || '';
+    fields.sort((a, b) => {
+      if (sortState.key === 'field') return a.path.localeCompare(b.path) * dir;
+      if (sortState.key === 'types') return getPrimaryType(a).localeCompare(getPrimaryType(b)) * dir;
+      if (sortState.key === 'coverage') return ((a.pct || 0) - (b.pct || 0)) * dir;
+      if (sortState.key === 'sample') return String(a.sample || '').localeCompare(String(b.sample || '')) * dir;
+      return 0;
+    });
+    return fields;
+  }, [schema?.fields, sortState]);
+
+  const sortIcon = (key) => {
+    if (sortState.key !== key) return null;
+    return sortState.dir === 'asc'
+      ? <ArrowUp className="w-3 h-3" style={{ color:'var(--accent)' }} />
+      : <ArrowDown className="w-3 h-3" style={{ color:'var(--accent)' }} />;
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between" style={{borderBottom:'1px solid var(--border)',background:'var(--surface-1)'}}>
@@ -38,7 +67,7 @@ export default function SchemaView({ db, collection, refreshToken = 0 }) {
         </div>
         <div className="flex items-center gap-2">
           <select value={sampleSize} onChange={e=>setSampleSize(parseInt(e.target.value))}
-            className="text-xs px-2 py-1 rounded-lg" style={{background:'var(--surface-2)',border:'1px solid var(--border)',color:'var(--text-primary)'}}>
+            className="ms-select text-xs">
             <option value="50">50 docs</option><option value="100">100 docs</option>
             <option value="200">200 docs</option><option value="500">500 docs</option>
           </select>
@@ -59,12 +88,20 @@ export default function SchemaView({ db, collection, refreshToken = 0 }) {
           <div style={{borderBottom:'1px solid var(--border)'}}>
             {/* Header */}
             <div className="grid grid-cols-12 gap-2 px-4 py-2 text-2xs font-medium uppercase tracking-wider" style={{color:'var(--text-tertiary)',borderBottom:'1px solid var(--border)',background:'var(--surface-1)'}}>
-              <div className="col-span-4">Field Path</div>
-              <div className="col-span-4">Types</div>
-              <div className="col-span-2">Coverage</div>
-              <div className="col-span-2">Sample</div>
+              <button className="col-span-4 flex items-center gap-1 text-left px-1 py-0.5 rounded-md transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]" onClick={() => toggleSort('field')}>
+                Field Path {sortIcon('field')}
+              </button>
+              <button className="col-span-4 flex items-center gap-1 text-left px-1 py-0.5 rounded-md transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]" onClick={() => toggleSort('types')}>
+                Types {sortIcon('types')}
+              </button>
+              <button className="col-span-2 flex items-center gap-1 text-left px-1 py-0.5 rounded-md transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]" onClick={() => toggleSort('coverage')}>
+                Coverage {sortIcon('coverage')}
+              </button>
+              <button className="col-span-2 flex items-center gap-1 text-left px-1 py-0.5 rounded-md transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]" onClick={() => toggleSort('sample')}>
+                Sample {sortIcon('sample')}
+              </button>
             </div>
-            {schema.fields.map((f, i) => (
+            {sortedFields.map((f, i) => (
               <div key={f.path} className="grid grid-cols-12 gap-2 px-4 py-2.5 text-xs transition-colors items-center"
                 style={{borderBottom:'1px solid var(--border)'}}
                 onMouseOver={e=>e.currentTarget.style.background='var(--surface-1)'}

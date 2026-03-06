@@ -1,0 +1,137 @@
+import api from './api';
+
+function safeFilename(value, fallback = 'export') {
+  const cleaned = String(value || '').trim().replace(/[<>:"/\\|?*\x00-\x1F]+/g, '_').replace(/\s+/g, '_');
+  return cleaned || fallback;
+}
+
+export function downloadTextFile(filename, text, mime = 'application/json') {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function docsToCsv(docs = []) {
+  if (!Array.isArray(docs) || docs.length === 0) return '';
+  const keys = [...new Set(docs.flatMap((doc) => Object.keys(doc || {})))];
+  const header = keys.join(',');
+  const rows = docs.map((doc) => keys.map((key) => {
+    const value = doc?.[key];
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
+    const str = String(value);
+    return (str.includes(',') || str.includes('"') || str.includes('\n'))
+      ? `"${str.replace(/"/g, '""')}"`
+      : str;
+  }).join(','));
+  return [header, ...rows].join('\n');
+}
+
+async function buildDbPackage(dbName, { includeIndexes = true, includeSchema = true } = {}) {
+  return api.exportDatabase(dbName, {
+    includeDocuments: true,
+    includeIndexes,
+    includeOptions: true,
+    includeSchema,
+  });
+}
+
+async function buildFilesForDatabase(dbName, options = {}) {
+  const mode = options.mode === 'collections' ? 'collections' : 'package';
+  const collectionFormat = options.collectionFormat === 'csv' ? 'csv' : 'json';
+  const pkg = await buildDbPackage(dbName, options);
+  const packageFilename = pkg.filename || `${safeFilename(dbName)}.mongostudio-db.json`;
+
+  if (mode === 'package') {
+    return [{
+      path: `${safeFilename(dbName)}/${packageFilename}`,
+      filename: packageFilename,
+      text: pkg.data,
+      mime: 'application/json',
+    }];
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(pkg.data);
+  } catch {
+    throw new Error(`Failed to parse export package for database "${dbName}".`);
+  }
+  const collections = Array.isArray(parsed?.collections) ? parsed.collections : [];
+  return collections.map((entry) => {
+    const docs = Array.isArray(entry?.documents) ? entry.documents : [];
+    const colName = safeFilename(entry?.name || 'collection');
+    const ext = collectionFormat === 'csv' ? 'csv' : 'json';
+    const filename = `${safeFilename(dbName)}.${colName}.${ext}`;
+    const text = collectionFormat === 'csv' ? docsToCsv(docs) : JSON.stringify(docs, null, 2);
+    return {
+      path: `${safeFilename(dbName)}/${colName}.${ext}`,
+      filename,
+      text,
+      mime: collectionFormat === 'csv' ? 'text/csv' : 'application/json',
+    };
+  });
+}
+
+async function downloadFilesAsZip(files, archiveName = 'mongostudio-export') {
+  if (!files.length) throw new Error('No export files generated.');
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+  files.forEach((file) => {
+    zip.file(file.path || file.filename, file.text);
+  });
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${safeFilename(archiveName)}.zip`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadFilesSeparately(files) {
+  if (!files.length) throw new Error('No export files generated.');
+  for (let idx = 0; idx < files.length; idx += 1) {
+    const file = files[idx];
+    downloadTextFile(file.filename, file.text, file.mime);
+    if (idx < files.length - 1) {
+      // Small gap helps browsers queue multiple downloads reliably.
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 90));
+    }
+  }
+}
+
+export async function exportSingleDatabase(dbName, options = {}) {
+  const archive = options.archive !== false;
+  const files = await buildFilesForDatabase(dbName, options);
+  if (archive) {
+    await downloadFilesAsZip(files, `${dbName}-export`);
+    return { files: files.length, archive: true };
+  }
+  await downloadFilesSeparately(files);
+  return { files: files.length, archive: false };
+}
+
+export async function exportMultipleDatabases(dbNames = [], options = {}) {
+  const names = [...new Set((dbNames || []).map((name) => String(name || '').trim()).filter(Boolean))];
+  if (!names.length) throw new Error('No databases to export.');
+  const files = [];
+  for (const dbName of names) {
+    // eslint-disable-next-line no-await-in-loop
+    const dbFiles = await buildFilesForDatabase(dbName, options);
+    files.push(...dbFiles);
+  }
+  const archive = options.archive !== false;
+  if (archive) {
+    await downloadFilesAsZip(files, options.archiveName || 'all-databases-export');
+    return { databases: names.length, files: files.length, archive: true };
+  }
+  await downloadFilesSeparately(files);
+  return { databases: names.length, files: files.length, archive: false };
+}
+

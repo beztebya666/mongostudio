@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import api from '../utils/api';
 import { Key, Plus, Trash, Refresh, Loader, AlertCircle, X, Check, ArrowUp, ArrowDown } from './Icons';
 import { formatBytes, formatNumber } from '../utils/formatters';
@@ -12,6 +12,7 @@ export default function IndexesView({ db, collection, onQueryMs, refreshToken = 
   const [indexOptions, setIndexOptions] = useState({ unique: false, sparse: false, background: true });
   const [creating, setCreating] = useState(false);
   const [confirmDrop, setConfirmDrop] = useState(null);
+  const [sortState, setSortState] = useState({ key: 'name', dir: 'asc' });
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -54,6 +55,41 @@ export default function IndexesView({ db, collection, onQueryMs, refreshToken = 
   const updateKeyField = (i, updates) => { const n = [...newKeys]; n[i] = { ...n[i], ...updates }; setNewKeys(n); };
   const removeKeyField = (i) => setNewKeys(newKeys.filter((_, j) => j !== i));
 
+  const toggleSort = (key) => {
+    setSortState((prev) => {
+      if (prev.key === key) return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+      return { key, dir: key === 'size' ? 'desc' : 'asc' };
+    });
+  };
+
+  const sortedIndexes = useMemo(() => {
+    const rows = [...indexes];
+    const dir = sortState.dir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      if (sortState.key === 'name') return String(a.name || '').localeCompare(String(b.name || '')) * dir;
+      if (sortState.key === 'keys') {
+        const ak = Object.keys(a.key || {}).join(',');
+        const bk = Object.keys(b.key || {}).join(',');
+        return ak.localeCompare(bk) * dir;
+      }
+      if (sortState.key === 'props') {
+        const ap = Number(Boolean(a.unique)) + Number(Boolean(a.sparse)) + Number(Boolean(a.v));
+        const bp = Number(Boolean(b.unique)) + Number(Boolean(b.sparse)) + Number(Boolean(b.v));
+        return (ap - bp) * dir;
+      }
+      if (sortState.key === 'size') return ((a.size || 0) - (b.size || 0)) * dir;
+      return 0;
+    });
+    return rows;
+  }, [indexes, sortState]);
+
+  const sortIcon = (key) => {
+    if (sortState.key !== key) return null;
+    return sortState.dir === 'asc'
+      ? <ArrowUp className="w-3 h-3" style={{ color:'var(--accent)' }} />
+      : <ArrowDown className="w-3 h-3" style={{ color:'var(--accent)' }} />;
+  };
+
   return (
     <div className="h-full flex flex-col">
       {/* Toolbar */}
@@ -81,7 +117,7 @@ export default function IndexesView({ db, collection, onQueryMs, refreshToken = 
                   placeholder="field name" className="flex-1 text-xs font-mono px-3 py-1.5 rounded-lg"
                   style={{background:'var(--surface-2)',border:'1px solid var(--border)',color:'var(--text-primary)'}} />
                 <select value={k.direction} onChange={e=>updateKeyField(i,{direction:parseInt(e.target.value)})}
-                  className="text-xs px-2 py-1.5 rounded-lg" style={{background:'var(--surface-2)',border:'1px solid var(--border)',color:'var(--text-primary)'}}>
+                  className="ms-select text-xs">
                   <option value={1}>Asc (1)</option>
                   <option value={-1}>Desc (-1)</option>
                   <option value="text">Text</option>
@@ -97,13 +133,13 @@ export default function IndexesView({ db, collection, onQueryMs, refreshToken = 
           <div className="mt-2 flex items-center gap-4 flex-wrap">
             <button onClick={addKeyField} className="text-2xs" style={{color:'var(--accent)'}}>+ Add field</button>
             <label className="flex items-center gap-1.5 text-2xs cursor-pointer" style={{color:'var(--text-secondary)'}}>
-              <input type="checkbox" checked={indexOptions.unique} onChange={e=>setIndexOptions({...indexOptions,unique:e.target.checked})} /> Unique
+              <input type="checkbox" className="ms-checkbox" checked={indexOptions.unique} onChange={e=>setIndexOptions({...indexOptions,unique:e.target.checked})} /> Unique
             </label>
             <label className="flex items-center gap-1.5 text-2xs cursor-pointer" style={{color:'var(--text-secondary)'}}>
-              <input type="checkbox" checked={indexOptions.sparse} onChange={e=>setIndexOptions({...indexOptions,sparse:e.target.checked})} /> Sparse
+              <input type="checkbox" className="ms-checkbox" checked={indexOptions.sparse} onChange={e=>setIndexOptions({...indexOptions,sparse:e.target.checked})} /> Sparse
             </label>
             <label className="flex items-center gap-1.5 text-2xs cursor-pointer" style={{color:'var(--text-secondary)'}}>
-              <input type="checkbox" checked={indexOptions.background} onChange={e=>setIndexOptions({...indexOptions,background:e.target.checked})} /> Background
+              <input type="checkbox" className="ms-checkbox" checked={indexOptions.background} onChange={e=>setIndexOptions({...indexOptions,background:e.target.checked})} /> Background
             </label>
           </div>
           <div className="mt-3 flex items-center gap-2">
@@ -134,13 +170,21 @@ export default function IndexesView({ db, collection, onQueryMs, refreshToken = 
           <div>
             {/* Header */}
             <div className="grid grid-cols-12 gap-2 px-4 py-2 text-2xs font-medium uppercase tracking-wider" style={{color:'var(--text-tertiary)',borderBottom:'1px solid var(--border)',background:'var(--surface-1)'}}>
-              <div className="col-span-3">Name</div>
-              <div className="col-span-4">Keys</div>
-              <div className="col-span-2">Properties</div>
-              <div className="col-span-2">Size</div>
+              <button className="col-span-3 flex items-center gap-1 text-left px-1 py-0.5 rounded-md transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]" onClick={() => toggleSort('name')}>
+                Name {sortIcon('name')}
+              </button>
+              <button className="col-span-4 flex items-center gap-1 text-left px-1 py-0.5 rounded-md transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]" onClick={() => toggleSort('keys')}>
+                Keys {sortIcon('keys')}
+              </button>
+              <button className="col-span-2 flex items-center gap-1 text-left px-1 py-0.5 rounded-md transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]" onClick={() => toggleSort('props')}>
+                Properties {sortIcon('props')}
+              </button>
+              <button className="col-span-2 flex items-center gap-1 text-left px-1 py-0.5 rounded-md transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]" onClick={() => toggleSort('size')}>
+                Size {sortIcon('size')}
+              </button>
               <div className="col-span-1"></div>
             </div>
-            {indexes.map((idx) => (
+            {sortedIndexes.map((idx) => (
               <div key={idx.name} className="grid grid-cols-12 gap-2 px-4 py-2.5 items-center transition-colors group"
                 style={{borderBottom:'1px solid var(--border)'}}
                 onMouseOver={e=>e.currentTarget.style.background='var(--surface-1)'}

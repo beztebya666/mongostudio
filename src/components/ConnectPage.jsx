@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Logo, Zap, Server, Loader, AlertCircle, Moon, Sun, ChevronDown, Lock, Globe, Settings, Trash } from './Icons';
+import { Logo, Zap, Server, Loader, AlertCircle, Moon, Sun, ChevronDown, Lock, Globe, Settings, Trash, X } from './Icons';
 
 const RECENT_KEY = 'mongostudio_recent';
 const PROFILES_KEY = 'mongostudio_profiles';
+const RECENT_PASSWORD_PREF_KEY = 'mongostudio_recent_dont_save_password';
+const CONNECT_HINTS_KEY = 'mongostudio_connect_hints';
 const DEFAULT_OPTIONS = {
   tls: undefined,
   tlsAllowInvalidCertificates: false,
@@ -17,12 +19,29 @@ const DEFAULT_OPTIONS = {
 };
 
 function getRecent() { try { return JSON.parse(localStorage.getItem(RECENT_KEY)||'[]').slice(0,5); } catch { return []; } }
+function getDontSaveRecentPassword() { try { return localStorage.getItem(RECENT_PASSWORD_PREF_KEY) === '1'; } catch { return false; } }
 function sanitizeSavedOptions(opts = {}, includePassword = false) {
   if (includePassword && typeof opts.password === 'string') return { ...opts };
   const { password, ...rest } = opts;
   return rest;
 }
-function saveRecent(uri, opts) { try { const m=maskUri(uri); const l=getRecent().filter(r=>r.masked!==m); l.unshift({uri,masked:m,ts:Date.now(),options:sanitizeSavedOptions(opts)}); localStorage.setItem(RECENT_KEY,JSON.stringify(l.slice(0,5))); } catch{} }
+function stripPasswordFromUri(uri) {
+  try {
+    return uri.replace(/(mongodb(?:\+srv)?:\/\/[^:/@]+):[^@]*@/i, '$1@');
+  } catch {
+    return uri;
+  }
+}
+function saveRecent(uri, opts, includePassword = true) {
+  try {
+    const savedUri = includePassword ? uri : stripPasswordFromUri(uri);
+    const savedOptions = sanitizeSavedOptions(opts, includePassword);
+    const masked = maskUri(savedUri);
+    const list = getRecent().filter((entry) => entry.masked !== masked);
+    list.unshift({ uri: savedUri, masked, ts: Date.now(), options: savedOptions });
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 5)));
+  } catch {}
+}
 function getProfiles() { try { return JSON.parse(localStorage.getItem(PROFILES_KEY)||'[]'); } catch { return []; } }
 function saveProfiles(p) { try { localStorage.setItem(PROFILES_KEY,JSON.stringify(p)); } catch{} }
 
@@ -70,19 +89,53 @@ function parseConnectionString(uri) {
 
 export default function ConnectPage({ onConnect, connecting, error, theme, onToggleTheme }) {
   const [uri, setUri] = useState('');
+  const [showUriEditor, setShowUriEditor] = useState(false);
   const [recent, setRecent] = useState([]);
   const [profiles, setProfiles] = useState([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
   const [profileName, setProfileName] = useState('');
   const [saveProfilePassword, setSaveProfilePassword] = useState(false);
+  const [dontSaveRecentPassword, setDontSaveRecentPassword] = useState(false);
+  const [dismissedHints, setDismissedHints] = useState({ topologyError: false, readPreferenceNote: false });
   const [options, setOptions] = useState({ ...DEFAULT_OPTIONS });
   const inputRef = useRef(null);
 
-  useEffect(() => { setRecent(getRecent()); setProfiles(getProfiles()); inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    setRecent(getRecent());
+    setProfiles(getProfiles());
+    setDontSaveRecentPassword(getDontSaveRecentPassword());
+    inputRef.current?.focus();
+  }, []);
   useEffect(() => {
     if (!options.username.trim() && saveProfilePassword) setSaveProfilePassword(false);
   }, [options.username, saveProfilePassword]);
+  useEffect(() => {
+    try { localStorage.setItem(RECENT_PASSWORD_PREF_KEY, dontSaveRecentPassword ? '1' : '0'); } catch {}
+  }, [dontSaveRecentPassword]);
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(CONNECT_HINTS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setDismissedHints({
+          topologyError: Boolean(parsed.topologyError),
+          readPreferenceNote: Boolean(parsed.readPreferenceNote),
+        });
+      }
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try { sessionStorage.setItem(CONNECT_HINTS_KEY, JSON.stringify(dismissedHints)); } catch {}
+  }, [dismissedHints]);
+  useEffect(() => {
+    if (!showUriEditor) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setShowUriEditor(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [showUriEditor]);
 
   const applyUriToOptions = (uriStr) => {
     const parsed = parseConnectionString(uriStr);
@@ -129,14 +182,15 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
       cleanOpts.username = options.username.trim();
       cleanOpts.password = options.password;
     }
-    saveRecent(uri.trim(), cleanOpts);
+    saveRecent(uri.trim(), cleanOpts, !dontSaveRecentPassword);
     onConnect(uri.trim(), cleanOpts);
   };
 
   const handleRecent = (item) => {
     const opts = item.options || {};
     setUri(item.uri);
-    setOptions({ ...DEFAULT_OPTIONS, ...opts, password: '' });
+    const savedPassword = typeof opts.password === 'string' ? opts.password : '';
+    setOptions({ ...DEFAULT_OPTIONS, ...opts, password: savedPassword });
     applyUriToOptions(item.uri);
     if (opts.username) return;
     onConnect(item.uri, opts);
@@ -163,8 +217,8 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
   const isTopologyError = error && (error.includes('DirectConnect') || error.includes('server selection') || error.includes('replica set') || error.includes('topology'));
 
   return (
-    <div className="h-screen w-screen flex items-center justify-center noise-bg overflow-hidden relative" style={{ background:'var(--surface-0)' }}>
-      <div className="absolute inset-0 overflow-hidden">
+    <div className="h-screen w-screen relative isolate flex items-start justify-center noise-bg overflow-y-auto overflow-x-hidden py-8 sm:py-10" style={{ background:'var(--surface-0)' }}>
+      <div className="fixed inset-0 overflow-hidden pointer-events-none -z-10">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full blur-[120px]" style={{background:'var(--accent)',opacity:0.04}} />
         <div className="absolute bottom-0 left-1/4 w-[400px] h-[400px] rounded-full blur-[100px]" style={{background:'var(--accent)',opacity:0.02}} />
         <div className="absolute inset-0 opacity-[0.015]" style={{ backgroundImage:`radial-gradient(circle at 1px 1px, var(--text-primary) 1px, transparent 0)`, backgroundSize:'48px 48px' }} />
@@ -193,9 +247,30 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
             {/* Header with Profiles */}
             <div className="flex items-center justify-between mb-3">
               <label className="block text-xs font-medium uppercase tracking-wider" style={{color:'var(--text-tertiary)'}}>Connection String</label>
-              <button type="button" onClick={()=>setShowProfiles(!showProfiles)} className="text-2xs font-medium" style={{color:'var(--accent)'}}>
-                {showProfiles ? 'Hide Profiles' : `Saved (${profiles.length})`}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowUriEditor(true)}
+                  className="inline-flex items-center justify-center gap-1 text-2xs rounded-md border transition-colors w-[86px] h-7"
+                  style={{ color:'var(--text-secondary)', borderColor:'var(--border)', background:'var(--surface-2)' }}
+                  title="Open multi-line editor"
+                >
+                  Editor
+                </button>
+                <button
+                  type="button"
+                  onClick={()=>setShowProfiles(!showProfiles)}
+                  className="inline-flex items-center justify-center gap-1 rounded-md border text-2xs font-medium transition-colors hover:bg-[var(--surface-3)] w-[86px] h-7"
+                  style={{
+                    color: showProfiles ? 'var(--text-primary)' : 'var(--accent)',
+                    borderColor:'var(--border)',
+                    background:'var(--surface-2)',
+                  }}
+                >
+                  <span>{showProfiles ? 'Profiles' : 'Saved'}</span>
+                  <span className="badge-blue">{profiles.length}</span>
+                </button>
+              </div>
             </div>
 
             {/* Profiles dropdown */}
@@ -204,7 +279,7 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
                 {profiles.length === 0 ? (
                   <div className="text-2xs text-center py-2" style={{color:'var(--text-tertiary)'}}>No saved profiles</div>
                 ) : profiles.map((p, i) => (
-                  <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg group transition-colors" style={{cursor:'pointer'}} onClick={()=>handleProfile(p)}>
+                  <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg group transition-colors hover:bg-[var(--surface-3)]" style={{cursor:'pointer'}} onClick={()=>handleProfile(p)}>
                     <Server className="w-3.5 h-3.5 flex-shrink-0" style={{color:'var(--text-tertiary)'}} />
                     <span className="text-xs font-medium flex-1 truncate" style={{color:'var(--text-secondary)'}}>{p.name}</span>
                     {typeof p.options?.password === 'string' && p.options.password.length > 0 && (
@@ -223,7 +298,7 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
                       checked={saveProfilePassword}
                       onChange={e=>setSaveProfilePassword(e.target.checked)}
                       disabled={!options.username.trim()}
-                      className="rounded"
+                      className="ms-checkbox"
                     />
                     Save password in this profile
                   </label>
@@ -277,8 +352,17 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
               </div>
             </div>
             <div className="mt-1 text-2xs" style={{color:'var(--text-tertiary)'}}>
-              Password is never saved in Recent. For Profiles, saving password is optional.
+              Recent keeps password by default. Turn it off below if needed. Profiles still keep password only when explicitly enabled.
             </div>
+            <label className="mt-1.5 flex items-center gap-2 text-2xs cursor-pointer" style={{color:'var(--text-secondary)'}}>
+              <input
+                type="checkbox"
+                checked={dontSaveRecentPassword}
+                onChange={(event) => setDontSaveRecentPassword(event.target.checked)}
+                className="ms-checkbox"
+              />
+              Don't save password in Recent
+            </label>
 
             {/* Error */}
             {error && (
@@ -287,10 +371,20 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
                   <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                   <span className="flex-1">{error}</span>
                 </div>
-                {isTopologyError && (
-                  <div className="mt-2 text-2xs px-2 py-1.5 rounded-lg" style={{background:'var(--surface-2)',border:'1px solid var(--border)',color:'var(--text-tertiary)'}}>
-                    <strong style={{color:'var(--text-secondary)'}}>Hint:</strong> For replica sets, all member hostnames must resolve from this machine.
-                    If not, enable <strong>DirectConnect</strong> and connect to one specific node (e.g. just the primary or just one secondary).
+                {isTopologyError && !dismissedHints.topologyError && (
+                  <div className="mt-2 text-2xs px-2 py-1.5 pr-8 rounded-lg relative" style={{background:'var(--surface-2)',border:'1px solid var(--border)',color:'var(--text-tertiary)'}}>
+                    <span className="block">
+                      <strong style={{color:'var(--text-secondary)'}}>Hint:</strong> For replica sets, all member hostnames must resolve from this machine.
+                      If not, enable <strong>DirectConnect</strong> and connect to one specific node (for example, a single primary or single secondary).
+                    </span>
+                    <button
+                      type="button"
+                      className="absolute top-0.5 right-0.5 p-1 rounded-md hover:bg-[var(--surface-3)]"
+                      onClick={() => setDismissedHints((prev) => ({ ...prev, topologyError: true }))}
+                      title="Hide hint for this session"
+                    >
+                      <X className="w-3 h-3" style={{ color:'var(--text-tertiary)' }} />
+                    </button>
                   </div>
                 )}
               </div>
@@ -322,7 +416,7 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
                     Read Preference
                   </label>
                   <select value={options.readPreference||''} onChange={e=>setOpt('readPreference',e.target.value)}
-                    className="w-full text-xs px-2.5 py-1.5 rounded-lg" style={{background:'var(--surface-2)',border:'1px solid var(--border)',color:'var(--text-primary)'}}>
+                    className="ms-select w-full text-xs">
                     <option value="">Default (primary)</option>
                     <option value="primaryPreferred">Primary Preferred</option>
                     <option value="secondary">Secondary</option>
@@ -337,11 +431,11 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
                 </div>
                 <div className="col-span-2 flex flex-wrap items-center gap-x-4 gap-y-2 mt-1">
                   <label className="flex items-center gap-2 text-2xs cursor-pointer" style={{color:'var(--text-secondary)'}}>
-                    <input type="checkbox" checked={options.tls===true} onChange={e=>setOpt('tls',e.target.checked?true:undefined)} className="rounded" />
+                    <input type="checkbox" checked={options.tls===true} onChange={e=>setOpt('tls',e.target.checked?true:undefined)} className="ms-checkbox" />
                     <Lock className="w-3 h-3" /> TLS/SSL
                   </label>
                   <label className="flex items-center gap-2 text-2xs cursor-pointer" style={{color:'var(--text-secondary)'}}>
-                    <input type="checkbox" checked={options.tlsAllowInvalidCertificates} onChange={e=>setOpt('tlsAllowInvalidCertificates',e.target.checked)} className="rounded" />
+                    <input type="checkbox" checked={options.tlsAllowInvalidCertificates} onChange={e=>setOpt('tlsAllowInvalidCertificates',e.target.checked)} className="ms-checkbox" />
                     Allow Invalid Certs
                   </label>
                   <label
@@ -349,23 +443,33 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
                     style={{color:'var(--text-secondary)'}}
                     title="DirectConnect: skip replica set discovery and connect directly to this one node. Required if RS member hostnames are not reachable."
                   >
-                    <input type="checkbox" checked={options.directConnection===true} onChange={e=>setOpt('directConnection',e.target.checked?true:undefined)} className="rounded" />
+                    <input type="checkbox" checked={options.directConnection===true} onChange={e=>setOpt('directConnection',e.target.checked?true:undefined)} className="ms-checkbox" />
                     <Globe className="w-3 h-3" /> DirectConnect
                   </label>
                   <label className="flex items-center gap-2 text-2xs cursor-pointer" style={{color:'var(--text-secondary)'}}>
-                    <input type="checkbox" checked={options.markAsProduction===true} onChange={e=>setOpt('markAsProduction',e.target.checked)} className="rounded" />
+                    <input type="checkbox" checked={options.markAsProduction===true} onChange={e=>setOpt('markAsProduction',e.target.checked)} className="ms-checkbox" />
                     Mark as production
                   </label>
                 </div>
-                {options.readPreference && options.readPreference !== 'primary' && !options.directConnection && (
-                  <div className="col-span-2 text-2xs px-2 py-1.5 rounded-lg" style={{background:'var(--surface-2)',border:'1px solid var(--border)',color:'var(--text-tertiary)'}}>
+                {options.readPreference && options.readPreference !== 'primary' && !options.directConnection && !dismissedHints.readPreferenceNote && (
+                  <div className="col-span-2 text-2xs px-2 py-1.5 pr-8 rounded-lg relative" style={{background:'var(--surface-2)',border:'1px solid var(--border)',color:'var(--text-tertiary)'}}>
+                    <span className="block">
                     <strong style={{color:'var(--text-secondary)'}}>Note:</strong> Read preference affects where READ operations are sent by the driver.
                     When connecting to a replica set, the topology always reports the primary — this is normal.
-                    {options.readPreference === 'secondary' || options.readPreference === 'secondaryPreferred'
-                      ? ' To connect directly to a secondary node, use DirectConnect with a single-host URI.'
-                      : ''}
-                  </div>
-                )}
+	                    {options.readPreference === 'secondary' || options.readPreference === 'secondaryPreferred'
+	                      ? ' To connect directly to a secondary node, use DirectConnect with a single-host URI.'
+	                      : ''}
+	                    </span>
+	                    <button
+	                      type="button"
+		                      className="absolute top-0.5 right-0.5 p-1 rounded-md hover:bg-[var(--surface-3)]"
+	                      onClick={() => setDismissedHints((prev) => ({ ...prev, readPreferenceNote: true }))}
+	                      title="Hide hint for this session"
+	                    >
+	                      <X className="w-3 h-3" style={{ color:'var(--text-tertiary)' }} />
+	                    </button>
+	                  </div>
+	                )}
               </div>
             )}
 
@@ -379,6 +483,45 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
             </div>
           </div>
         </form>
+
+        {showUriEditor && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/50"
+              onClick={() => setShowUriEditor(false)}
+              aria-label="Close editor overlay"
+            />
+            <div className="relative w-full max-w-3xl rounded-2xl p-4" style={{ background:'var(--surface-1)', border:'1px solid var(--border)' }}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold uppercase tracking-wider" style={{ color:'var(--text-tertiary)' }}>
+                  Connection String Editor
+                </div>
+                <button type="button" onClick={() => setShowUriEditor(false)} className="btn-ghost p-1.5">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <textarea
+                value={uri}
+                onChange={(event) => handleUriChange(event.target.value)}
+                spellCheck={false}
+                className="w-full rounded-lg px-3 py-2 text-xs font-mono focus:outline-none"
+                style={{
+                  background:'var(--surface-2)',
+                  border:'1px solid var(--border)',
+                  color:'var(--text-primary)',
+                  minHeight:'180px',
+                  resize:'both',
+                }}
+              />
+              <div className="mt-3 flex items-center justify-end">
+                <button type="button" className="btn-ghost text-xs" onClick={() => setShowUriEditor(false)}>
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Recent */}
         {recent.length > 0 && (
