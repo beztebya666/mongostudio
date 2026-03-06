@@ -1270,7 +1270,7 @@ if (isProd) app.get('*', (_, res) => res.sendFile(join(__dirname,'..','dist','in
 
 const server = createServer(app);
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n  ⚡ MongoStudio v2.0.0 → http://localhost:${PORT}\n  MongoDB 3.6 → 8.x | ${isProd?'production':'development'}\n`);
+  console.log(`\n  ⚡ MongoStudio v2.5.0 → http://localhost:${PORT}\n  MongoDB 3.6 → 8.x | ${isProd?'production':'development'}\n`);
 });
 
 function shutdown() { console.log('\nShutting down…'); for(const[,{client}]of connections)client.close().catch(()=>{}); server.close(()=>process.exit(0)); setTimeout(()=>process.exit(1),5000); }

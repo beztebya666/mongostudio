@@ -543,7 +543,7 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
         )}
 
         <div className="mt-8 text-center float-in float-in-delay-3">
-          <p className="text-2xs" style={{color:'var(--text-tertiary)'}}>Open Source — MIT License — v2.0.0</p>
+          <p className="text-2xs" style={{color:'var(--text-tertiary)'}}>Open Source — MIT License — v2.5.0</p>
         </div>
       </div>
     </div>
