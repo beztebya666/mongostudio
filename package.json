@@ -11,12 +11,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "express": "^4.21.0",
-    "mongodb": "^5.9.2",
-    "cors": "^2.8.5",
     "compression": "^1.7.4",
-    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "jszip": "^3.10.1",
+    "mongodb": "^5.9.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {

@@ -1,0 +1,7 @@
+{
+  "rateLimit": {
+    "windowMs": 60000,
+    "apiMax": 3000,
+    "heavyMax": 300
+  }
+}

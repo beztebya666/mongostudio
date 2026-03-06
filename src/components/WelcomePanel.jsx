@@ -1,36 +1,185 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../utils/api';
-import { Database, Zap, Server, Activity, Shield, ShieldOff, Info } from './Icons';
+import { Database, Zap, Server, Activity, Shield, Info, ChevronDown, X, Layers, Document, Loader } from './Icons';
 import { formatBytes, formatNumber, formatDuration } from '../utils/formatters';
 
 function formatHostDisplay(host) {
   if (!host) return '';
-  const parts = host.split(',').map(h => h.trim());
+  const parts = host.split(',').map((h) => h.trim());
   if (parts.length === 1) return parts[0];
   if (parts.length === 2) return `${parts[0]}, ${parts[1]}`;
   return `${parts[0]}, ${parts[1]} +${parts.length - 2} more`;
 }
 
+const DB_STATS_EAGER_LIMIT = 40;
+const DEFAULT_WELCOME_HINTS = { readPrefPrimary: false };
+
+function loadWelcomeHintsState(key) {
+  if (!key) return DEFAULT_WELCOME_HINTS;
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return DEFAULT_WELCOME_HINTS;
+    const parsed = JSON.parse(raw);
+    return { readPrefPrimary: Boolean(parsed?.readPrefPrimary) };
+  } catch {
+    return DEFAULT_WELCOME_HINTS;
+  }
+}
+
 export default function WelcomePanel({ databases, connectionInfo, refreshToken = 0 }) {
+  const connectionId = connectionInfo?.connectionId || 'session';
+  const sectionStateKey = `mongostudio_welcome_sections:${connectionId}`;
+  const hintStateKey = `mongostudio_welcome_hints:${connectionId}`;
   const [serverStatus, setServerStatus] = useState(null);
-  const [metrics, setMetrics] = useState(null);
+  const [dbStats, setDbStats] = useState({});
+  const [dbStatsLoading, setDbStatsLoading] = useState({});
+  const [dbStatsProgress, setDbStatsProgress] = useState({ loaded: 0, total: 0 });
+  const [collapsedSections, setCollapsedSections] = useState({
+    serverDetails: false,
+    databases: false,
+    capabilities: false,
+  });
+  const [dismissedHints, setDismissedHints] = useState(() => loadWelcomeHintsState(hintStateKey));
+  const dbStatsSeqRef = useRef(0);
 
   useEffect(() => {
     api.getServerStatus().then(setServerStatus).catch(() => {});
-    api.getMetrics().then(setMetrics).catch(() => {});
   }, [refreshToken]);
 
+  useEffect(() => {
+    dbStatsSeqRef.current += 1;
+    const seq = dbStatsSeqRef.current;
+
+    if (databases.length === 0) {
+      setDbStats({});
+      setDbStatsLoading({});
+      setDbStatsProgress({ loaded: 0, total: 0 });
+      return undefined;
+    }
+
+    const targets = databases.slice(0, Math.min(databases.length, DB_STATS_EAGER_LIMIT)).map((db) => db.name);
+    const targetSet = new Set(targets);
+
+    setDbStats((prev) => {
+      const next = {};
+      for (const [name, stats] of Object.entries(prev)) {
+        if (targetSet.has(name)) next[name] = stats;
+      }
+      return next;
+    });
+    setDbStatsLoading((prev) => {
+      const next = {};
+      for (const [name, state] of Object.entries(prev)) {
+        if (targetSet.has(name)) next[name] = state;
+      }
+      return next;
+    });
+    setDbStatsProgress({ loaded: 0, total: targets.length });
+
+    const queue = targets.map((name) => ({ dbName: name, attempt: 0 }));
+    const workerCount = Math.min(3, queue.length);
+    let completed = 0;
+
+    const runWorker = async () => {
+      while (queue.length > 0 && seq === dbStatsSeqRef.current) {
+        const nextItem = queue.shift();
+        const dbName = nextItem?.dbName;
+        const attempt = Number(nextItem?.attempt || 0);
+        if (!dbName) break;
+        let finalized = true;
+        setDbStatsLoading((prev) => ({ ...prev, [dbName]: true }));
+        try {
+          const stats = await api.getDatabaseStats(dbName);
+          if (seq !== dbStatsSeqRef.current) return;
+          setDbStats((prev) => ({ ...prev, [dbName]: stats || { _error: true } }));
+        } catch (err) {
+          if (seq !== dbStatsSeqRef.current) return;
+          const retryable = err?.status === 429 || err?.status >= 500 || err?.errorType === 'network';
+          if (retryable && attempt < 3) {
+            finalized = false;
+            queue.push({ dbName, attempt: attempt + 1 });
+          } else {
+            setDbStats((prev) => ({ ...prev, [dbName]: { _error: true } }));
+          }
+        } finally {
+          if (seq !== dbStatsSeqRef.current) return;
+          setDbStatsLoading((prev) => {
+            const next = { ...prev };
+            delete next[dbName];
+            return next;
+          });
+          if (finalized) {
+            completed += 1;
+            setDbStatsProgress({ loaded: completed, total: targets.length });
+          }
+        }
+      }
+    };
+
+    Promise.all(Array.from({ length: workerCount }, () => runWorker())).catch(() => {});
+    return () => {
+      dbStatsSeqRef.current += 1;
+    };
+  }, [databases.map((db) => db.name).join('|'), refreshToken]);
+
   const totalSize = databases.reduce((s, d) => s + (d.sizeOnDisk || 0), 0);
+  const totalCollections = useMemo(
+    () => Object.values(dbStats).reduce((sum, item) => sum + (item?.collections || 0), 0),
+    [dbStats],
+  );
+  const totalDocuments = useMemo(
+    () => Object.values(dbStats).reduce((sum, item) => sum + (item?.objects || 0), 0),
+    [dbStats],
+  );
+  const dbStatsReady = dbStatsProgress.total > 0 && dbStatsProgress.loaded >= dbStatsProgress.total;
   const topology = connectionInfo?.topology;
   const readPref = connectionInfo?.readPreference;
   const showReadPref = readPref && readPref !== 'primary';
   const isMultiHost = connectionInfo?.host && connectionInfo.host.includes(',');
 
-  // Collect all RS members: prefer topology.hosts (from hello cmd), fallback to serverStatus repl.hosts
-  const rsMembers = topology?.hosts ||
-    (serverStatus?.serverStatus?.repl?.hosts
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(sectionStateKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setCollapsedSections({
+          serverDetails: Boolean(parsed.serverDetails),
+          databases: Boolean(parsed.databases),
+          capabilities: Boolean(parsed.capabilities),
+        });
+      } else {
+        setCollapsedSections({ serverDetails: false, databases: false, capabilities: false });
+      }
+    } catch {
+      setCollapsedSections({ serverDetails: false, databases: false, capabilities: false });
+    }
+  }, [sectionStateKey]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(sectionStateKey, JSON.stringify(collapsedSections));
+    } catch {}
+  }, [sectionStateKey, collapsedSections]);
+
+  useEffect(() => {
+    setDismissedHints(loadWelcomeHintsState(hintStateKey));
+  }, [hintStateKey]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(hintStateKey, JSON.stringify(dismissedHints));
+    } catch {}
+  }, [hintStateKey, dismissedHints]);
+
+  const rsMembers = topology?.hosts || (
+    serverStatus?.serverStatus?.repl?.hosts
       ? [...(serverStatus.serverStatus.repl.hosts), ...(serverStatus.serverStatus.repl.passives || [])]
-      : null);
+      : null
+  );
+
+  const toggleSection = (name) => {
+    setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }));
+  };
 
   return (
     <div className="h-full overflow-auto">
@@ -66,29 +215,34 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
             {topology?.kind === 'sharded' && <span className="badge-blue">MONGOS</span>}
             {showReadPref && (
               <span className="badge-blue" title={`Read preference: ${readPref}`}>
-                reads → {readPref}
+                reads -&gt; {readPref}
               </span>
             )}
           </div>
 
-          {/* Read preference explanation */}
-          {showReadPref && topology?.kind === 'replicaSet' && topology?.role === 'primary' && (
-            <div className="mt-3 text-xs px-3 py-2 rounded-lg flex items-start gap-2" style={{ background:'var(--surface-2)', border:'1px solid var(--border)', color:'var(--text-tertiary)' }}>
+          {showReadPref && topology?.kind === 'replicaSet' && topology?.role === 'primary' && !dismissedHints.readPrefPrimary && (
+            <div className="mt-3 text-xs px-3 py-2 pr-8 rounded-lg relative" style={{ background:'var(--surface-2)', border:'1px solid var(--border)', color:'var(--text-tertiary)' }}>
               <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color:'var(--accent)', opacity:0.7 }} />
               <span>
-                Topology shows <strong style={{ color:'var(--text-secondary)' }}>PRIMARY</strong> — this is normal for replica set connections.
+                Topology shows <strong style={{ color:'var(--text-secondary)' }}>PRIMARY</strong> - this is normal for replica set connections.
                 The driver routes <strong style={{ color:'var(--text-secondary)' }}>read</strong> operations to <strong style={{ color:'var(--text-secondary)' }}>{readPref}</strong> members.
                 To connect directly to a secondary node, use a single-host URI with <strong style={{ color:'var(--text-secondary)' }}>DirectConnect</strong> enabled.
               </span>
+              <button
+                className="absolute top-0.5 right-0.5 p-1 rounded-md transition-colors hover:bg-[var(--surface-3)]"
+                onClick={() => setDismissedHints((prev) => ({ ...prev, readPrefPrimary: true }))}
+                title="Hide hint for this session"
+              >
+                <X className="w-3.5 h-3.5" style={{ color:'var(--text-tertiary)' }} />
+              </button>
             </div>
           )}
 
-          {/* RS Members */}
           {topology?.kind === 'replicaSet' && rsMembers && rsMembers.length > 0 && (
             <div className="mt-3">
               <div className="text-2xs uppercase tracking-wider mb-1.5" style={{ color:'var(--text-tertiary)' }}>Replica Set Members</div>
               <div className="flex flex-wrap gap-1.5">
-                {rsMembers.map(member => (
+                {rsMembers.map((member) => (
                   <span
                     key={member}
                     className={`text-2xs font-mono px-2 py-1 rounded-lg ${member === topology.primary ? 'badge-green' : 'badge-blue'}`}
@@ -102,7 +256,6 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
             </div>
           )}
 
-          {/* Multi-host note for non-RS */}
           {isMultiHost && topology?.kind !== 'replicaSet' && (
             <div className="mt-2 text-2xs" style={{ color:'var(--text-tertiary)' }}>
               {connectionInfo.host.split(',').length} nodes · <span title={connectionInfo.host} className="font-mono">{connectionInfo.host.split(',')[0]}</span> and {connectionInfo.host.split(',').length - 1} more
@@ -110,80 +263,175 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
           )}
         </div>
 
-        <div className="grid grid-cols-4 gap-3 mb-6 float-in float-in-delay-1">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6 float-in float-in-delay-1">
           {[
-            { label: 'Databases', value: databases.length, icon: Database, color: 'var(--accent)' },
+            { label: 'Databases', value: formatNumber(databases.length), icon: Database, color: 'var(--accent)' },
+            {
+              label: 'Collections',
+              value: dbStatsReady ? formatNumber(totalCollections) : null,
+              loading: !dbStatsReady,
+              icon: Layers,
+              color: '#34d399',
+            },
+            {
+              label: 'Documents',
+              value: dbStatsReady ? formatNumber(totalDocuments) : null,
+              loading: !dbStatsReady,
+              icon: Document,
+              color: '#fbbf24',
+            },
             { label: 'Total Size', value: formatBytes(totalSize), icon: Server, color: '#60a5fa' },
             { label: 'Version', value: connectionInfo?.version || '-', icon: Info, color: '#a78bfa' },
-            { label: 'Production Guard', value: connectionInfo?.isProduction ? 'ON' : 'OFF', icon: connectionInfo?.isProduction ? ShieldOff : Shield, color: connectionInfo?.isProduction ? '#fbbf24' : '#34d399' },
-          ].map(({ label, value, icon: Icon, color }) => (
+            { label: 'Production Guard', value: connectionInfo?.isProduction ? 'ON' : 'OFF', icon: Shield, color: connectionInfo?.isProduction ? '#fbbf24' : '#34d399' },
+          ].map(({ label, value, loading, icon: Icon, color }) => (
             <div key={label} className="p-4 rounded-xl transition-all" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
               <div className="flex items-center gap-2 mb-2">
-                <Icon className="w-4 h-4" style={{ color, opacity: 0.8 }} />
+                <Icon className="w-4 h-4 flex-shrink-0" style={{ color, opacity: 0.9 }} />
                 <span className="text-2xs uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{label}</span>
               </div>
-              <span className="text-lg font-display font-bold" style={{ color: 'var(--text-primary)' }}>{value}</span>
+              {loading ? (
+                <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  <Loader className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+                  loading...
+                </span>
+              ) : (
+                <span className="text-lg font-display font-bold" style={{ color: 'var(--text-primary)' }}>{value}</span>
+              )}
             </div>
           ))}
         </div>
+        {!dbStatsReady && dbStatsProgress.total > 0 && (
+          <div className="mb-5 text-2xs inline-flex items-center gap-1.5" style={{ color:'var(--text-tertiary)' }}>
+            <Loader className="w-3 h-3" style={{ color:'var(--accent)' }} />
+            Loading database stats {dbStatsProgress.loaded}/{dbStatsProgress.total}
+          </div>
+        )}
 
         {serverStatus?.serverStatus && (
           <div className="mb-6 float-in float-in-delay-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
-              <Activity className="w-3.5 h-3.5" />Server Details
-            </h3>
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: 'Uptime', value: serverStatus.serverStatus.uptime ? formatDuration(serverStatus.serverStatus.uptime * 1000) : '-' },
-                { label: 'Connections', value: serverStatus.serverStatus.connections ? `${serverStatus.serverStatus.connections.current} / ${serverStatus.serverStatus.connections.available}` : '-' },
-                { label: 'Storage Engine', value: serverStatus.serverStatus.storageEngine?.name || '-' },
-                ...(serverStatus.serverStatus.opcounters ? [
-                  { label: 'Inserts', value: formatNumber(serverStatus.serverStatus.opcounters.insert || 0) },
-                  { label: 'Queries', value: formatNumber(serverStatus.serverStatus.opcounters.query || 0) },
-                  { label: 'Updates', value: formatNumber(serverStatus.serverStatus.opcounters.update || 0) },
-                ] : []),
-                ...(serverStatus.serverStatus.mem ? [
-                  { label: 'Resident Memory', value: `${serverStatus.serverStatus.mem.resident || 0} MB` },
-                ] : []),
-              ].map(({ label, value }) => (
-                <div key={label} className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                  <div className="text-2xs mb-0.5" style={{ color: 'var(--text-tertiary)' }}>{label}</div>
-                  <div className="text-sm font-mono" style={{ color: 'var(--text-primary)' }}>{value}</div>
-                </div>
-              ))}
-            </div>
+            <button
+              className="w-full text-left text-xs font-semibold uppercase tracking-wider mb-3 flex items-center justify-between gap-2 px-2 py-2 rounded-lg transition-colors hover:bg-[var(--surface-1)]"
+              style={{ color: 'var(--text-tertiary)' }}
+              onClick={() => toggleSection('serverDetails')}
+              title={collapsedSections.serverDetails ? 'Expand' : 'Collapse'}
+            >
+              <span className="flex items-center gap-2"><Activity className="w-3.5 h-3.5" />Server Details</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${collapsedSections.serverDetails ? '-rotate-90' : ''}`} />
+            </button>
+            {!collapsedSections.serverDetails && (
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { label: 'Uptime', value: serverStatus.serverStatus.uptime ? formatDuration(serverStatus.serverStatus.uptime * 1000) : '-' },
+                  { label: 'Connections', value: serverStatus.serverStatus.connections ? `${serverStatus.serverStatus.connections.current} / ${serverStatus.serverStatus.connections.available}` : '-' },
+                  { label: 'Storage Engine', value: serverStatus.serverStatus.storageEngine?.name || '-' },
+                  ...(serverStatus.serverStatus.opcounters ? [
+                    { label: 'Inserts (uptime)', value: formatNumber(serverStatus.serverStatus.opcounters.insert || 0) },
+                    { label: 'Queries (uptime)', value: formatNumber(serverStatus.serverStatus.opcounters.query || 0) },
+                    { label: 'Updates (uptime)', value: formatNumber(serverStatus.serverStatus.opcounters.update || 0) },
+                  ] : []),
+                  ...(serverStatus.serverStatus.mem ? [
+                    { label: 'Resident Memory', value: `${serverStatus.serverStatus.mem.resident || 0} MB` },
+                  ] : []),
+                ].map(({ label, value }) => (
+                  <div key={label} className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                    <div className="text-2xs mb-0.5" style={{ color: 'var(--text-tertiary)' }}>{label}</div>
+                    <div className="text-sm font-mono" style={{ color: 'var(--text-primary)' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!collapsedSections.serverDetails && serverStatus.serverStatus?.opcounters && (
+              <div className="mt-2 text-2xs" style={{ color:'var(--text-tertiary)' }}>
+                Operation counters are cumulative since MongoDB process start (uptime).
+              </div>
+            )}
           </div>
         )}
 
         <div className="float-in float-in-delay-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
-            <Database className="w-3.5 h-3.5" />Databases
-          </h3>
-          <div className="space-y-1">
-            {databases.map((db) => (
-              <div key={db.name} className="flex items-center justify-between px-3 py-2 rounded-lg transition-colors" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
-                <div className="flex items-center gap-2">
-                  <Database className="w-3.5 h-3.5" style={{ color: 'var(--accent)', opacity: 0.6 }} />
-                  <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{db.name}</span>
+          <button
+            className="w-full text-left text-xs font-semibold uppercase tracking-wider mb-3 flex items-center justify-between gap-2 px-2 py-2 rounded-lg transition-colors hover:bg-[var(--surface-1)]"
+            style={{ color: 'var(--text-tertiary)' }}
+            onClick={() => toggleSection('databases')}
+            title={collapsedSections.databases ? 'Expand' : 'Collapse'}
+          >
+            <span className="flex items-center gap-2"><Database className="w-3.5 h-3.5" />Databases</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${collapsedSections.databases ? '-rotate-90' : ''}`} />
+          </button>
+          {!collapsedSections.databases && (
+              <div className="space-y-1">
+                {databases.map((db) => {
+                  const rawStats = Object.prototype.hasOwnProperty.call(dbStats, db.name) ? dbStats[db.name] : null;
+                  const hasStats = Boolean(rawStats && !rawStats._error);
+                  const hasStatsError = Boolean(rawStats && rawStats._error);
+                  const stats = hasStats ? rawStats : null;
+                  return (
+                <div key={db.name} className="flex items-center justify-between px-3 py-2 rounded-lg transition-colors" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Database className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent)', opacity: 0.6 }} />
+                    <div className="min-w-0">
+                      <span className="text-sm font-medium block truncate" style={{ color: 'var(--text-primary)' }}>{db.name}</span>
+                      {hasStats ? (
+                        <span className="text-2xs" style={{ color:'var(--text-tertiary)' }}>
+                          {typeof stats?.collections === 'number' ? formatNumber(stats.collections) : '-'} cols
+                          {' | '}
+                          {typeof stats?.objects === 'number' ? formatNumber(stats.objects) : '-'} docs
+                        </span>
+                      ) : hasStatsError ? (
+                        <span className="text-2xs" style={{ color:'var(--text-tertiary)' }}>
+                          stats unavailable
+                        </span>
+                      ) : (
+                        <span className="text-2xs inline-flex items-center gap-1" style={{ color:'var(--text-tertiary)' }}>
+                          <Loader className="w-3 h-3" style={{ color:'var(--accent)' }} />
+                          loading stats...
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xs font-mono block" style={{ color: 'var(--text-tertiary)' }}>{formatBytes(db.sizeOnDisk || 0)}</span>
+                    {hasStats ? (
+                      <span className="text-2xs font-mono block" style={{ color: 'var(--text-tertiary)' }}>
+                        avg {typeof stats?.avgObjSize === 'number' ? formatBytes(Math.round(stats.avgObjSize)) : '-'}
+                      </span>
+                    ) : hasStatsError ? (
+                      <span className="text-2xs font-mono block" style={{ color: 'var(--text-tertiary)' }}>
+                        avg -
+                      </span>
+                    ) : (
+                      <span className="text-2xs font-mono block" style={{ color: 'var(--text-tertiary)' }}>
+                        avg ...
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <span className="text-2xs font-mono" style={{ color: 'var(--text-tertiary)' }}>{formatBytes(db.sizeOnDisk || 0)}</span>
-              </div>
-            ))}
-          </div>
+                  );
+                })}
+            </div>
+          )}
         </div>
 
         {connectionInfo?.capabilities && (
           <div className="mt-6 float-in float-in-delay-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
-              <Zap className="w-3.5 h-3.5" />Capabilities
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(connectionInfo.capabilities).map(([key, supported]) => (
-                <span key={key} className={supported ? 'badge-green' : 'badge-red'}>
-                  {key.replace(/([A-Z])/g, ' $1').trim()}
-                </span>
-              ))}
-            </div>
+            <button
+              className="w-full text-left text-xs font-semibold uppercase tracking-wider mb-3 flex items-center justify-between gap-2 px-2 py-2 rounded-lg transition-colors hover:bg-[var(--surface-1)]"
+              style={{ color: 'var(--text-tertiary)' }}
+              onClick={() => toggleSection('capabilities')}
+              title={collapsedSections.capabilities ? 'Expand' : 'Collapse'}
+            >
+              <span className="flex items-center gap-2"><Zap className="w-3.5 h-3.5" />Capabilities</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${collapsedSections.capabilities ? '-rotate-90' : ''}`} />
+            </button>
+            {!collapsedSections.capabilities && (
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(connectionInfo.capabilities).map(([key, supported]) => (
+                  <span key={key} className={supported ? 'badge-green' : 'badge-red'}>
+                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

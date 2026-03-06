@@ -6,11 +6,14 @@ import CollectionView from './CollectionView';
 import QueryConsole from './QueryConsole';
 import WelcomePanel from './WelcomePanel';
 import SchemaView from './SchemaView';
+import AuditView from './AuditView';
 import SettingsModal from './SettingsModal';
 import ConfirmDialog from './modals/ConfirmDialog';
 import { X } from './Icons';
 
 const BANNER_STATE_PREFIX = 'mongostudio_banners:';
+const DISPLAY_SETTINGS_KEY = 'mongostudio_display_settings';
+const DEFAULT_DISPLAY_SETTINGS = { showTopTags: false };
 
 export default function Workspace({ connectionInfo, onDisconnect, theme, onToggleTheme }) {
   const [databases, setDatabases] = useState([]);
@@ -27,6 +30,16 @@ export default function Workspace({ connectionInfo, onDisconnect, theme, onToggl
   const [deletedContext, setDeletedContext] = useState(null);
   const [dismissedBanners, setDismissedBanners] = useState({ production: false, warnings: false });
   const [showPowerModeConfirm, setShowPowerModeConfirm] = useState(false);
+  const [displaySettings, setDisplaySettings] = useState(() => {
+    try {
+      const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
+      if (!raw) return DEFAULT_DISPLAY_SETTINGS;
+      const parsed = JSON.parse(raw);
+      return { ...DEFAULT_DISPLAY_SETTINGS, ...parsed };
+    } catch {
+      return DEFAULT_DISPLAY_SETTINGS;
+    }
+  });
 
   useEffect(() => {
     api.getExecutionConfig().then((c) => setExecMode(c.mode)).catch(() => {});
@@ -56,6 +69,12 @@ export default function Workspace({ connectionInfo, onDisconnect, theme, onToggl
       sessionStorage.setItem(`${BANNER_STATE_PREFIX}${connId}`, JSON.stringify(dismissedBanners));
     } catch {}
   }, [dismissedBanners, connectionInfo?.connectionId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DISPLAY_SETTINGS_KEY, JSON.stringify(displaySettings));
+    } catch {}
+  }, [displaySettings]);
 
   const refreshDatabaseList = useCallback(async () => {
     const data = await api.listDatabases();
@@ -168,6 +187,7 @@ export default function Workspace({ connectionInfo, onDisconnect, theme, onToggl
   }, []);
 
   const renderContent = () => {
+    if (activeTab === 'audit') return <AuditView refreshToken={refreshToken} />;
     if (!selectedCol) return <WelcomePanel databases={databases} connectionInfo={connectionInfo} refreshToken={refreshToken} />;
     switch (activeTab) {
       case 'query':
@@ -228,6 +248,7 @@ export default function Workspace({ connectionInfo, onDisconnect, theme, onToggl
         onRefresh={handleGlobalRefresh}
         refreshing={refreshing || loading}
         deletedContext={deletedContext}
+        showTopTags={Boolean(displaySettings.showTopTags)}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -254,6 +275,8 @@ export default function Workspace({ connectionInfo, onDisconnect, theme, onToggl
           onConfigApplied={setExecMode}
           onClose={() => setShowSettings(false)}
           connectionInfo={connectionInfo}
+          displaySettings={displaySettings}
+          onDisplaySettingsChange={(changes) => setDisplaySettings((prev) => ({ ...prev, ...changes }))}
         />
       )}
 

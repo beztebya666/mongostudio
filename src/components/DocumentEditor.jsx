@@ -1,14 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import api from '../utils/api';
-import { Save, X, AlertCircle, Check, Loader } from './Icons';
+import { Save, X, AlertCircle, Check, Loader, Upload } from './Icons';
 
 export default function DocumentEditor({ db, collection, document, onSave, onCancel }) {
   const isInsert = !document;
   const [value, setValue] = useState('');
   const [error, setError] = useState(null);
+  const [info, setInfo] = useState(null);
   const [saving, setSaving] = useState(false);
   const [lineCount, setLineCount] = useState(1);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (document) {
@@ -26,6 +28,7 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
 
   const handleSave = async () => {
     setError(null);
+    setInfo(null);
     let parsed;
     try { parsed = JSON.parse(value); }
     catch (e) { setError(`Invalid JSON: ${e.message}`); return; }
@@ -33,8 +36,22 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
     setSaving(true);
     try {
       if (isInsert) {
-        await api.insertDocument(db, collection, parsed);
+        if (Array.isArray(parsed)) {
+          const result = await api.insertDocuments(db, collection, parsed);
+          setInfo(`Inserted ${result.insertedCount || parsed.length} documents.`);
+        } else if (parsed && typeof parsed === 'object') {
+          await api.insertDocument(db, collection, parsed);
+        } else {
+          setError('Insert supports JSON object or array of objects.');
+          setSaving(false);
+          return;
+        }
       } else {
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          setError('Update requires a JSON object.');
+          setSaving(false);
+          return;
+        }
         const id = typeof document._id === 'object' ? (document._id.$oid || JSON.stringify(document._id)) : String(document._id);
         await api.updateDocument(db, collection, id, parsed);
       }
@@ -63,6 +80,30 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
     } catch (e) { setError(`Cannot format: ${e.message}`); }
   };
 
+  const handleLoadFromFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!(parsed && typeof parsed === 'object')) {
+        setError('File must contain a JSON object or array.');
+        return;
+      }
+      setValue(JSON.stringify(parsed, null, 2));
+      setError(null);
+      if (Array.isArray(parsed)) {
+        setInfo(`Loaded ${parsed.length} documents from file. Click Insert to import all.`);
+      } else {
+        setInfo('Loaded document from file.');
+      }
+    } catch (e) {
+      setError(`Invalid JSON file: ${e.message}`);
+    } finally {
+      if (event.target) event.target.value = '';
+    }
+  };
+
   return (
     <div className="h-full flex flex-col">
       {/* Toolbar */}
@@ -78,6 +119,20 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
           )}
         </div>
         <div className="flex items-center gap-2">
+          {isInsert && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json,text/json,.txt"
+                className="hidden"
+                onChange={handleLoadFromFile}
+              />
+              <button onClick={() => fileInputRef.current?.click()} className="btn-ghost text-xs flex items-center gap-1.5">
+                <Upload className="w-3.5 h-3.5" />From File
+              </button>
+            </>
+          )}
           <button onClick={handleFormat} className="btn-ghost text-xs">Format</button>
           <span className="text-2xs" style={{color:'var(--text-tertiary)'}}>⌘+S to save</span>
           <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-1.5">
@@ -91,6 +146,11 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
       {error && (
         <div className="mx-4 mt-3 flex items-start gap-2 text-red-400 text-xs p-3 rounded-lg" style={{background:'rgba(239,68,68,0.05)',border:'1px solid rgba(239,68,68,0.2)'}}>
           <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /><span>{error}</span>
+        </div>
+      )}
+      {info && (
+        <div className="mx-4 mt-3 flex items-start gap-2 text-emerald-400 text-xs p-3 rounded-lg" style={{background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.3)'}}>
+          <Check className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /><span>{info}</span>
         </div>
       )}
 
