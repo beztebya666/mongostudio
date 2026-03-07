@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚡ MongoStudio
+# ⚡MongoStudio
 
 **A blazing-fast, beautiful MongoDB UI**
 
