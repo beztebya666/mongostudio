@@ -41,7 +41,7 @@ FROM node:20-alpine
 
 LABEL org.opencontainers.image.title="MongoStudio"
 LABEL org.opencontainers.image.description="Blazing-fast MongoDB UI — supports MongoDB 2.6 through 8.x"
-LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.version="2.5.0"
 LABEL org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app
@@ -60,6 +60,7 @@ COPY --from=builder /app/dist ./dist
 
 # Non-root user
 RUN addgroup -g 1001 -S app && adduser -S app -u 1001
+RUN chown -R app:app /app
 USER app
 
 # Health check — works with version detection endpoint
