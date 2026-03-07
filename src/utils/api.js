@@ -1,3 +1,5 @@
+import MockApiClient from './mockApi';
+
 const BASE = '/api';
 
 function parseUsernameFromUri(uri) {
@@ -13,7 +15,7 @@ function parseUsernameFromUri(uri) {
   }
 }
 
-class ApiClient {
+class HttpApiClient {
   constructor() {
     this.connectionId = null;
     this.uiUsername = null;
@@ -257,5 +259,62 @@ class ApiClient {
   }
 }
 
-export const api = new ApiClient();
+class ApiRouter {
+  constructor() {
+    this.realClient = new HttpApiClient();
+    this.mockClient = new MockApiClient();
+    this.mode = 'real';
+  }
+
+  setMode(mode = 'real') {
+    this.mode = mode === 'mock' ? 'mock' : 'real';
+    if (this.mode === 'mock') {
+      this.realClient.connectionId = null;
+      this.realClient.uiUsername = null;
+    } else {
+      this.mockClient.connectionId = null;
+      this.mockClient.uiUsername = null;
+      this.mockClient.session = null;
+    }
+    return this.mode;
+  }
+
+  getMode() {
+    return this.mode;
+  }
+
+  isMockMode() {
+    return this.mode === 'mock';
+  }
+
+  get activeClient() {
+    return this.mode === 'mock' ? this.mockClient : this.realClient;
+  }
+}
+
+const router = new ApiRouter();
+
+export const setApiMode = (mode) => router.setMode(mode);
+export const getApiMode = () => router.getMode();
+export const isMockApiMode = () => router.isMockMode();
+
+export const api = new Proxy(router, {
+  get(target, prop) {
+    if (prop in target) {
+      const value = target[prop];
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+    const value = target.activeClient[prop];
+    return typeof value === 'function' ? value.bind(target.activeClient) : value;
+  },
+  set(target, prop, value) {
+    if (prop in target) {
+      target[prop] = value;
+      return true;
+    }
+    target.activeClient[prop] = value;
+    return true;
+  },
+});
+
 export default api;
