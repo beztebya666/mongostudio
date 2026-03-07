@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import api from './utils/api';
+import api, { setApiMode } from './utils/api';
 import ConnectPage from './components/ConnectPage';
 import Workspace from './components/Workspace';
 
@@ -23,9 +23,12 @@ export default function App() {
     setTheme(t => t === 'dark' ? 'light' : 'dark');
   }, []);
 
+  const isMockUri = useCallback((uri) => /^mock:\/\//i.test(String(uri || '')), []);
+
   const handleConnect = useCallback(async (uri, options = {}) => {
     setConnecting(true);
     setError(null);
+    setApiMode(isMockUri(uri) ? 'mock' : 'real');
     try {
       const info = await api.connect(uri, options);
       setConnectionInfo(info);
@@ -38,7 +41,7 @@ export default function App() {
     } finally {
       setConnecting(false);
     }
-  }, []);
+  }, [isMockUri]);
 
   const handleDisconnect = useCallback(async () => {
     await api.disconnect();

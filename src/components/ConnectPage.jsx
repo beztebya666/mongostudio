@@ -186,6 +186,15 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
     onConnect(uri.trim(), cleanOpts);
   };
 
+  const handleDemoConnect = () => {
+    if (connecting) return;
+    const demoUri = 'mock://demo.local/sample_mflix';
+    const demoOptions = { readPreference: 'primary' };
+    setUri(demoUri);
+    saveRecent(demoUri, demoOptions, false);
+    onConnect(demoUri, demoOptions);
+  };
+
   const handleRecent = (item) => {
     const opts = item.options || {};
     setUri(item.uri);
@@ -320,8 +329,20 @@ export default function ConnectPage({ onConnect, connecting, error, theme, onTog
                 {connecting ? <Loader style={{color:'var(--surface-0)'}} /> : <Zap className="w-4 h-4" />}
               </button>
             </div>
-            <div className="mt-1 text-2xs" style={{color:'var(--text-tertiary)'}}>
-              Advanced options auto-fill from URI params on paste.
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <div className="text-2xs" style={{color:'var(--text-tertiary)'}}>
+                Advanced options auto-fill from URI params on paste.
+              </div>
+              <button
+                type="button"
+                onClick={handleDemoConnect}
+                disabled={connecting}
+                className="text-2xs px-2 py-1 rounded-md border disabled:opacity-50"
+                style={{ color:'var(--accent)', borderColor:'var(--border)', background:'var(--surface-2)' }}
+                title="Open demo mode without real MongoDB"
+              >
+                Try Demo
+              </button>
             </div>
 
             {/* Username / Password */}
