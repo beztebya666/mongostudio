@@ -132,19 +132,16 @@ Full JSON editor with line numbers, tab indentation, keyboard shortcuts (⌘+Ent
 ## Architecture
 
 ```
-mongostudio/
-├── server/index.js      # Express API + MongoDB compat layer
-├── src/                  # React 18 frontend
-│   ├── components/       # UI components
-│   ├── utils/            # API client, formatters
-│   └── index.css         # Tailwind + custom styles
-├── Dockerfile            # Multi-stage production build
-└── package.json
+HTML: index.html (SPA, #root)
+CSS: Tailwind CSS + custom index.css (CSS variables, dark/light)
+JS/Frontend: React 18 (JSX), no TypeScript
+Build: Vite + PostCSS + Autoprefixer
+API client: fetch (custom src/utils/api.js)
+Backend: Node.js + Express
+MongoDB: official MongoDB driver (no ORM)
+Security/API middleware: helmet, cors, compression, express-rate-limit
+Deployment: Docker (multi-stage, production static dist)
 ```
-
-**Backend**: Express.js + native MongoDB driver. Version-aware compat layer handles API differences across MongoDB 2.6–8.x.
-
-**Frontend**: React 18 + Vite + Tailwind CSS. Instant builds, tree-shaken, <200KB gzipped.
 
 ## Local Development
 
