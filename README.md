@@ -26,6 +26,9 @@ MongoStudio is a lightweight, stunning MongoDB GUI that runs in a single Docker 
 - **📦 Lightweight** — ~50MB Docker image, minimal dependencies
 
 ## Quick Start
+
+Demo: https://beztebya666.github.io/mongostudio/
+
 ```bash
 # Pull from ghcr
 docker pull ghcr.io/beztebya666/mongostudio:latest
