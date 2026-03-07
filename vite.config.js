@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig({
-  base: '/mongostudio/',
+export default defineConfig(({ mode }) => ({
+  base: mode === 'pages' ? '/mongostudio/' : '/',
   plugins: [react()],
   server: {
     port: 5173,
@@ -22,4 +22,4 @@ export default defineConfig({
     sourcemap: false,
     minify: 'esbuild',
   },
-});
+}));
