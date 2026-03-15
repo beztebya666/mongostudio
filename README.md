@@ -30,7 +30,7 @@ MongoStudio is a lightweight, stunning MongoDB GUI that runs in a single Docker 
 - **👤 Connection Profiles** — Save, edit, export/import profiles with optional password and admin key
 - **🧪 Try Demo** — mock mode synced with real UI/API flow (except real shells and server tools)
 - **🔒 Secure** — Helmet.js, non-root container, admin-gated sensitive tools, no MongoDB document data stored server-side
-- **📦 Lightweight** — ~50MB Docker image, minimal dependencies
+- **📦 Lightweight** — ~50-275MB Docker image, minimal dependencies
 
 ## Quick Start
 
