@@ -44,10 +44,29 @@ export default function App() {
   }, [isMockUri]);
 
   const handleDisconnect = useCallback(async () => {
+    try { api.abortInFlight?.('disconnect'); } catch {}
     await api.disconnect();
     setConnected(false);
     setConnectionInfo(null);
   }, []);
+
+  useEffect(() => {
+    if (!connected) return undefined;
+    if (!connectionInfo?.connectionId) return undefined;
+    if (api.isMockMode?.() === true) return undefined;
+    let cancelled = false;
+    const refreshConnectionInfo = async () => {
+      try {
+        const fresh = await api.getConnectionInfo();
+        if (cancelled || !fresh || typeof fresh !== 'object') return;
+        setConnectionInfo((prev) => (prev ? { ...prev, ...fresh } : prev));
+      } catch {}
+    };
+    refreshConnectionInfo();
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, connectionInfo?.connectionId]);
 
   if (!connected) {
     return (

@@ -8,17 +8,18 @@ export default function DatabaseExportDialog({
   busy = false,
   mode = 'package',
   onModeChange,
-  archive = true,
+  archive = false,
   onArchiveChange,
   collectionFormat = 'json',
   onCollectionFormatChange,
-  includeIndexes = true,
+  includeIndexes = false,
   onIncludeIndexesChange,
-  includeSchema = true,
+  includeSchema = false,
   onIncludeSchemaChange,
   items = [],
   selectedItems = [],
   itemsLabel = 'Items',
+  progress = null,
   onToggleItem,
   onSelectAll,
   onClearAll,
@@ -28,13 +29,32 @@ export default function DatabaseExportDialog({
   if (!open) return null;
   const hasItemsChooser = Array.isArray(items) && items.length > 0;
   const selectedSet = new Set(selectedItems || []);
+  const receivedBytes = Number(progress?.receivedBytes || 0);
+  const totalBytesRaw = Number(progress?.totalBytes);
+  const totalBytes = Number.isFinite(totalBytesRaw) && totalBytesRaw > 0 ? totalBytesRaw : null;
+  const percentValue = progress?.percent;
+  const percent = typeof percentValue === 'number' && Number.isFinite(percentValue)
+    ? Math.max(0, Math.min(100, Math.round(percentValue)))
+    : null;
+
+  const formatBytes = (value) => {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num) || num <= 0) return '0 B';
+    if (num < 1024) return `${Math.round(num)} B`;
+    if (num < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`;
+    if (num < 1024 * 1024 * 1024) return `${(num / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(num / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  };
+  const progressLabel = totalBytes
+    ? `${percent ?? 0}% • ${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`
+    : `${formatBytes(receivedBytes)} downloaded`;
 
   return (
     <div className="fixed inset-0 z-[220] flex items-center justify-center p-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/50"
-        onClick={() => !busy && onCancel?.()}
+        onClick={() => onCancel?.()}
         aria-label="Close database export dialog"
       />
       <div className="relative w-full max-w-md rounded-xl p-4 animate-fade-in" style={{ background:'var(--surface-1)', border:'1px solid var(--border)' }}>
@@ -42,7 +62,7 @@ export default function DatabaseExportDialog({
           <div className="text-sm font-semibold" style={{ color:'var(--text-primary)' }}>
             {title}
           </div>
-          <button type="button" className="btn-ghost p-1.5" onClick={() => onCancel?.()} disabled={busy}>
+          <button type="button" className="btn-ghost p-1.5" onClick={() => onCancel?.()}>
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -173,9 +193,24 @@ export default function DatabaseExportDialog({
             />
             Include schema snapshot
           </label>
+          {busy && progress && (
+            <div className="rounded-md px-2 py-1.5 space-y-1" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+              <div className="text-2xs" style={{ color: 'var(--text-tertiary)' }}>{progressLabel}</div>
+              <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                <div
+                  className={percent === null ? 'h-full rounded-full ms-progress-indeterminate' : 'h-full rounded-full'}
+                  style={{
+                    width: percent === null ? '34%' : `${percent}%`,
+                    background: 'var(--accent)',
+                    opacity: percent === null ? 0.85 : 1,
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
         <div className="mt-4 flex items-center justify-end gap-2">
-          <button type="button" className="btn-ghost text-xs" onClick={() => onCancel?.()} disabled={busy}>
+          <button type="button" className="btn-ghost text-xs" onClick={() => onCancel?.()}>
             Cancel
           </button>
           <button type="button" className="btn-primary text-xs px-3 py-1.5" onClick={() => onSubmit?.()} disabled={busy || (hasItemsChooser && selectedSet.size === 0)}>

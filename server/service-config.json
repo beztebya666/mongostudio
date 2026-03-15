@@ -3,5 +3,20 @@
     "windowMs": 60000,
     "apiMax": 3000,
     "heavyMax": 300
+  },
+  "governor": {
+    "interactivePerConnection": 4,
+    "metadataPerConnection": 2,
+    "heavyPerConnection": 1,
+    "heavyGlobal": 20
+  },
+  "metadataCache": {
+    "maxEntriesPerConnection": 2000,
+    "ttlDbStatsMs": 30000,
+    "ttlCollectionStatsMs": 30000,
+    "ttlIndexListMs": 60000,
+    "ttlSchemaQuickMs": 60000,
+    "ttlApproxTotalMs": 30000,
+    "ttlExactTotalMs": 300000
   }
 }

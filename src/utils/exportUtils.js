@@ -5,13 +5,37 @@ function safeFilename(value, fallback = 'export') {
   return cleaned || fallback;
 }
 
+export const SMART_STREAM_THRESHOLD_DOCS = 20000;
+const DB_EXPORT_TIMEOUT_DEFAULT_MS = 4 * 60 * 60 * 1000;
+
+export function shouldUseSmartStreamExport({
+  limitChoice = '',
+  limitValue = null,
+  estimate = null,
+  threshold = SMART_STREAM_THRESHOLD_DOCS,
+  force = false,
+} = {}) {
+  if (typeof window === 'undefined' || typeof window.showSaveFilePicker !== 'function') return false;
+  if (force) return true;
+  const mode = String(limitChoice || '').trim().toLowerCase();
+  if (mode === 'exact' || mode === 'unlimited' || mode === 'all') return true;
+  const numericLimit = Number(limitValue);
+  if (Number.isFinite(numericLimit) && numericLimit >= Number(threshold || SMART_STREAM_THRESHOLD_DOCS)) return true;
+  const numericEstimate = Number(estimate);
+  if (Number.isFinite(numericEstimate) && numericEstimate >= Number(threshold || SMART_STREAM_THRESHOLD_DOCS)) return true;
+  return false;
+}
+
 export function downloadTextFile(filename, text, mime = 'application/json') {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
   link.click();
+  link.remove();
   URL.revokeObjectURL(url);
 }
 
@@ -31,13 +55,38 @@ function docsToCsv(docs = []) {
   return [header, ...rows].join('\n');
 }
 
-async function buildDbPackage(dbName, { includeIndexes = true, includeSchema = true } = {}) {
-  return api.exportDatabase(dbName, {
-    includeDocuments: true,
-    includeIndexes,
-    includeOptions: true,
-    includeSchema,
-  });
+async function buildDbPackage(
+  dbName,
+  {
+    includeIndexes = true,
+    includeSchema = true,
+    includeDocuments = true,
+    includeOptions = true,
+    limitPerCollection = 0,
+    schemaSampleSize = 150,
+    heavyTimeoutMs = DB_EXPORT_TIMEOUT_DEFAULT_MS,
+    heavyConfirm = true,
+    controller,
+    onProgress,
+  } = {},
+) {
+  return api.exportDatabase(
+    dbName,
+    {
+      includeDocuments,
+      includeIndexes,
+      includeOptions,
+      includeSchema,
+      limitPerCollection,
+      schemaSampleSize,
+    },
+    {
+      heavyTimeoutMs,
+      heavyConfirm,
+      controller,
+      onProgress,
+    },
+  );
 }
 
 async function buildFilesForDatabase(dbName, options = {}) {
@@ -45,21 +94,28 @@ async function buildFilesForDatabase(dbName, options = {}) {
   const collectionFormat = options.collectionFormat === 'csv' ? 'csv' : 'json';
   const pkg = await buildDbPackage(dbName, options);
   const packageFilename = pkg.filename || `${safeFilename(dbName)}.mongostudio-db.json`;
+  const packageText = typeof pkg?.data === 'string'
+    ? pkg.data
+    : JSON.stringify(pkg?.data || {}, null, 2);
 
   if (mode === 'package') {
     return [{
       path: `${safeFilename(dbName)}/${packageFilename}`,
       filename: packageFilename,
-      text: pkg.data,
+      text: packageText,
       mime: 'application/json',
     }];
   }
 
   let parsed;
-  try {
-    parsed = JSON.parse(pkg.data);
-  } catch {
-    throw new Error(`Failed to parse export package for database "${dbName}".`);
+  if (pkg?.data && typeof pkg.data === 'object' && !Array.isArray(pkg.data)) {
+    parsed = pkg.data;
+  } else {
+    try {
+      parsed = JSON.parse(packageText);
+    } catch {
+      throw new Error(`Failed to parse export package for database "${dbName}".`);
+    }
   }
   const collections = Array.isArray(parsed?.collections) ? parsed.collections : [];
   return collections.map((entry) => {
@@ -89,7 +145,10 @@ async function downloadFilesAsZip(files, archiveName = 'mongostudio-export') {
   const link = document.createElement('a');
   link.href = url;
   link.download = `${safeFilename(archiveName)}.zip`;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
   link.click();
+  link.remove();
   URL.revokeObjectURL(url);
 }
 
@@ -108,10 +167,44 @@ async function downloadFilesSeparately(files) {
 
 export async function exportSingleDatabase(dbName, options = {}) {
   const archive = options.archive !== false;
+  const mode = options.mode === 'collections' ? 'collections' : 'package';
+  const canStreamToDisk = typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function';
+  const canUseApiDirectStream = typeof api?.exportDatabaseToFile === 'function';
+  if (mode === 'package' && canStreamToDisk && canUseApiDirectStream) {
+    await api.exportDatabaseToFile(
+      dbName,
+      {
+        includeDocuments: options.includeDocuments !== false,
+        includeIndexes: options.includeIndexes !== false,
+        includeOptions: options.includeOptions !== false,
+        includeSchema: options.includeSchema !== false,
+        limitPerCollection: Number(options.limitPerCollection) || 0,
+        schemaSampleSize: Number(options.schemaSampleSize) || 150,
+      },
+      {
+        heavyTimeoutMs: options.heavyTimeoutMs,
+        heavyConfirm: options.heavyConfirm,
+        controller: options.controller,
+        onProgress: options.onProgress,
+        budget: options.budget,
+        filename: archive
+          ? `${safeFilename(dbName)}.mongostudio-db.zip`
+          : `${safeFilename(dbName)}.mongostudio-db.json`,
+        archive,
+      },
+    );
+    return { files: 1, archive, streamed: true };
+  }
   const files = await buildFilesForDatabase(dbName, options);
   if (archive) {
-    await downloadFilesAsZip(files, `${dbName}-export`);
-    return { files: files.length, archive: true };
+    try {
+      await downloadFilesAsZip(files, `${dbName}-export`);
+      return { files: files.length, archive: true };
+    } catch {
+      // Fallback keeps export working even if zip chunk loading fails in current runtime.
+      await downloadFilesSeparately(files);
+      return { files: files.length, archive: false, fallback: 'separate' };
+    }
   }
   await downloadFilesSeparately(files);
   return { files: files.length, archive: false };
@@ -120,16 +213,28 @@ export async function exportSingleDatabase(dbName, options = {}) {
 export async function exportMultipleDatabases(dbNames = [], options = {}) {
   const names = [...new Set((dbNames || []).map((name) => String(name || '').trim()).filter(Boolean))];
   if (!names.length) throw new Error('No databases to export.');
+  const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
   const files = [];
-  for (const dbName of names) {
+  for (let index = 0; index < names.length; index += 1) {
+    const dbName = names[index];
     // eslint-disable-next-line no-await-in-loop
-    const dbFiles = await buildFilesForDatabase(dbName, options);
+    const dbFiles = await buildFilesForDatabase(dbName, {
+      ...options,
+      onProgress: onProgress
+        ? (progress) => onProgress({ ...(progress || {}), database: dbName, databaseIndex: index + 1, databaseTotal: names.length })
+        : undefined,
+    });
     files.push(...dbFiles);
   }
   const archive = options.archive !== false;
   if (archive) {
-    await downloadFilesAsZip(files, options.archiveName || 'all-databases-export');
-    return { databases: names.length, files: files.length, archive: true };
+    try {
+      await downloadFilesAsZip(files, options.archiveName || 'all-databases-export');
+      return { databases: names.length, files: files.length, archive: true };
+    } catch {
+      await downloadFilesSeparately(files);
+      return { databases: names.length, files: files.length, archive: false, fallback: 'separate' };
+    }
   }
   await downloadFilesSeparately(files);
   return { databases: names.length, files: files.length, archive: false };
