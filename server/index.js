@@ -1286,15 +1286,20 @@ function buildServerToolUri(conn = {}, node = '') {
   const sourceUri = String(conn?.uri || '').trim();
   if (!sourceUri) throw createRequestError('Connection URI is missing.', 500);
 
-  /* ── ensure authSource is present in the URI ── */
+  /* ── authSource: inject when credentials exist, strip when they don't ── */
   let targetUri = sourceUri;
-  const existingAuthSource = getMongoUriOptionValue(targetUri, 'authSource');
-  if (!existingAuthSource) {
-    const connectOptions = conn?.connectOptions && typeof conn.connectOptions === 'object' ? conn.connectOptions : {};
-    const authSource = String(connectOptions.authSource || conn?.defaultDb || '').trim();
-    if (authSource) {
-      targetUri = withMongoUriOption(targetUri, 'authSource', authSource);
+  const uriHasCredentials = Boolean(readMongoUriUserInfo(sourceUri).username);
+  if (uriHasCredentials) {
+    const existingAuthSource = getMongoUriOptionValue(targetUri, 'authSource');
+    if (!existingAuthSource) {
+      const connectOptions = conn?.connectOptions && typeof conn.connectOptions === 'object' ? conn.connectOptions : {};
+      const authSource = String(connectOptions.authSource || conn?.defaultDb || '').trim();
+      if (authSource) {
+        targetUri = withMongoUriOption(targetUri, 'authSource', authSource);
+      }
     }
+  } else {
+    targetUri = withoutMongoUriOption(targetUri, 'authSource');
   }
 
   /* ── strip database from URI path to avoid conflict with --db flag ── */
@@ -1953,6 +1958,23 @@ function withMongoUriOption(uri = '', key = '', value = '') {
   const rawQuery = qIndex === -1 ? '' : withoutHash.slice(qIndex + 1);
   const params = new URLSearchParams(rawQuery);
   params.set(optionKey, optionValue);
+  const nextQuery = params.toString();
+  return `${base}${nextQuery ? `?${nextQuery}` : ''}${hashPart}`;
+}
+
+function withoutMongoUriOption(uri = '', key = '') {
+  const source = String(uri || '').trim();
+  const optionKey = String(key || '').trim();
+  if (!source || !optionKey) return source;
+  const hashIndex = source.indexOf('#');
+  const withoutHash = hashIndex === -1 ? source : source.slice(0, hashIndex);
+  const hashPart = hashIndex === -1 ? '' : source.slice(hashIndex);
+  const qIndex = withoutHash.indexOf('?');
+  if (qIndex === -1) return source;
+  const base = withoutHash.slice(0, qIndex);
+  const rawQuery = withoutHash.slice(qIndex + 1);
+  const params = new URLSearchParams(rawQuery);
+  params.delete(optionKey);
   const nextQuery = params.toString();
   return `${base}${nextQuery ? `?${nextQuery}` : ''}${hashPart}`;
 }
