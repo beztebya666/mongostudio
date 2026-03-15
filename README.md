@@ -36,7 +36,8 @@ MongoStudio is a lightweight, stunning MongoDB GUI that runs in a single Docker 
 
 Demo: https://beztebya666.github.io/mongostudio/
 
-If you pull from a registry, use the same fully qualified image name in `docker run`.
+If you pull from a registry, use the same fully qualified image name in `docker run`.   
+Also you may sometimes need argument: `--security-opt seccomp=unconfined`   
 Examples below use `mongostudio` for a locally built image or a local tag alias.
 
 ```bash
