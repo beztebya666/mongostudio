@@ -1274,6 +1274,14 @@ function resolveServerManagementContext(req, source = {}, { requirePath = false 
   };
 }
 
+function stripMongoUriDatabase(uri = '') {
+  const source = String(uri || '').trim();
+  if (!source) return source;
+  const match = source.match(/^(mongodb(?:\+srv)?:\/\/[^/?#]*)\/[^?#]*(.*)?$/i);
+  if (!match) return source;
+  return `${match[1]}/${match[2] || ''}`;
+}
+
 function buildServerToolUri(conn = {}, node = '') {
   const sourceUri = String(conn?.uri || '').trim();
   if (!sourceUri) throw createRequestError('Connection URI is missing.', 500);
@@ -1288,6 +1296,9 @@ function buildServerToolUri(conn = {}, node = '') {
       targetUri = withMongoUriOption(targetUri, 'authSource', authSource);
     }
   }
+
+  /* ── strip database from URI path to avoid conflict with --db flag ── */
+  targetUri = stripMongoUriDatabase(targetUri);
 
   /* ── node targeting ── */
   const selectedNode = String(node || '').trim();
