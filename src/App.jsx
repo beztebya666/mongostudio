@@ -45,7 +45,8 @@ export default function App() {
 
   const handleDisconnect = useCallback(async () => {
     try { api.abortInFlight?.('disconnect'); } catch {}
-    await api.disconnect();
+    try { await api.disconnect(); } catch {}
+    setApiMode('real');
     setConnected(false);
     setConnectionInfo(null);
   }, []);
