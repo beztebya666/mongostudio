@@ -1277,11 +1277,23 @@ function resolveServerManagementContext(req, source = {}, { requirePath = false 
 function buildServerToolUri(conn = {}, node = '') {
   const sourceUri = String(conn?.uri || '').trim();
   if (!sourceUri) throw createRequestError('Connection URI is missing.', 500);
+
+  /* ── ensure authSource is present in the URI ── */
+  let targetUri = sourceUri;
+  const existingAuthSource = getMongoUriOptionValue(targetUri, 'authSource');
+  if (!existingAuthSource) {
+    const connectOptions = conn?.connectOptions && typeof conn.connectOptions === 'object' ? conn.connectOptions : {};
+    const authSource = String(connectOptions.authSource || conn?.defaultDb || '').trim();
+    if (authSource) {
+      targetUri = withMongoUriOption(targetUri, 'authSource', authSource);
+    }
+  }
+
+  /* ── node targeting ── */
   const selectedNode = String(node || '').trim();
-  if (!selectedNode) return sourceUri;
+  if (!selectedNode) return targetUri;
   const isSameNode = nodeMatchesTopologyTarget(conn, selectedNode, conn?.topology?.me || '')
     || sameHostToken(conn?.topology?.me || conn?.host || '', selectedNode);
-  let targetUri = sourceUri;
   if (!isSameNode) {
     const isSrv = /^mongodb\+srv:\/\//i.test(sourceUri);
     if (isSrv && selectedNode.includes(':')) {
