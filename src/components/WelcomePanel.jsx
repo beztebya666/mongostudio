@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../utils/api';
-import { Database, Zap, Server, Activity, Shield, Info, ChevronDown, X, Layers, Document, Loader } from './Icons';
+import { Database, Zap, Server, Activity, Shield, Info, ChevronDown, ArrowUp, X, Layers, Document, Loader } from './Icons';
 import { formatBytes, formatNumber, formatDuration } from '../utils/formatters';
 
 function formatHostDisplay(host) {
@@ -26,7 +26,7 @@ function loadWelcomeHintsState(key) {
   }
 }
 
-export default function WelcomePanel({ databases, connectionInfo, refreshToken = 0 }) {
+export default function WelcomePanel({ databases, connectionInfo, refreshToken = 0, metadata = null }) {
   const connectionId = connectionInfo?.connectionId || 'session';
   const sectionStateKey = `mongostudio_welcome_sections:${connectionId}`;
   const hintStateKey = `mongostudio_welcome_hints:${connectionId}`;
@@ -40,13 +40,26 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
     capabilities: false,
   });
   const [dismissedHints, setDismissedHints] = useState(() => loadWelcomeHintsState(hintStateKey));
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const dbStatsSeqRef = useRef(0);
+  const scrollRef = useRef(null);
+  const hasSharedMetadata = Boolean(metadata && metadata.loaded);
+  const sharedStats = hasSharedMetadata && metadata?.stats && typeof metadata.stats === 'object' ? metadata.stats : {};
+  const sharedFreshness = hasSharedMetadata && metadata?.freshness && typeof metadata.freshness === 'object' ? metadata.freshness : {};
+  const effectiveStats = hasSharedMetadata ? sharedStats : dbStats;
+  const effectiveProgress = hasSharedMetadata
+    ? {
+        loaded: databases.reduce((sum, db) => sum + (Object.prototype.hasOwnProperty.call(sharedFreshness, db.name) ? 1 : 0), 0),
+        total: databases.length,
+      }
+    : dbStatsProgress;
 
   useEffect(() => {
     api.getServerStatus().then(setServerStatus).catch(() => {});
   }, [refreshToken]);
 
   useEffect(() => {
+    if (hasSharedMetadata) return undefined;
     dbStatsSeqRef.current += 1;
     const seq = dbStatsSeqRef.current;
 
@@ -120,18 +133,18 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
     return () => {
       dbStatsSeqRef.current += 1;
     };
-  }, [databases.map((db) => db.name).join('|'), refreshToken]);
+  }, [databases.map((db) => db.name).join('|'), refreshToken, hasSharedMetadata]);
 
   const totalSize = databases.reduce((s, d) => s + (d.sizeOnDisk || 0), 0);
   const totalCollections = useMemo(
-    () => Object.values(dbStats).reduce((sum, item) => sum + (item?.collections || 0), 0),
-    [dbStats],
+    () => Object.values(effectiveStats).reduce((sum, item) => sum + (item?.collections || 0), 0),
+    [effectiveStats],
   );
   const totalDocuments = useMemo(
-    () => Object.values(dbStats).reduce((sum, item) => sum + (item?.objects || 0), 0),
-    [dbStats],
+    () => Object.values(effectiveStats).reduce((sum, item) => sum + (item?.objects || 0), 0),
+    [effectiveStats],
   );
-  const dbStatsReady = dbStatsProgress.total > 0 && dbStatsProgress.loaded >= dbStatsProgress.total;
+  const dbStatsReady = effectiveProgress.total > 0 && effectiveProgress.loaded >= effectiveProgress.total;
   const topology = connectionInfo?.topology;
   const readPref = connectionInfo?.readPreference;
   const showReadPref = readPref && readPref !== 'primary';
@@ -171,6 +184,15 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
     } catch {}
   }, [hintStateKey, dismissedHints]);
 
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return undefined;
+    const onScroll = () => setShowScrollTop(node.scrollTop > 420);
+    onScroll();
+    node.addEventListener('scroll', onScroll, { passive: true });
+    return () => node.removeEventListener('scroll', onScroll);
+  }, [databases.length, refreshToken]);
+
   const rsMembers = topology?.hosts || (
     serverStatus?.serverStatus?.repl?.hosts
       ? [...(serverStatus.serverStatus.repl.hosts), ...(serverStatus.serverStatus.repl.passives || [])]
@@ -182,7 +204,7 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
   };
 
   return (
-    <div className="h-full overflow-auto">
+    <div ref={scrollRef} className="h-full overflow-auto relative">
       <div className="max-w-3xl mx-auto px-6 py-8">
         <div className="mb-8 float-in">
           <h2 className="text-2xl font-display font-bold tracking-tight mb-1" style={{ color: 'var(--text-primary)' }}>
@@ -300,10 +322,10 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
             </div>
           ))}
         </div>
-        {!dbStatsReady && dbStatsProgress.total > 0 && (
+        {!dbStatsReady && effectiveProgress.total > 0 && (
           <div className="mb-5 text-2xs inline-flex items-center gap-1.5" style={{ color:'var(--text-tertiary)' }}>
             <Loader className="w-3 h-3" style={{ color:'var(--accent)' }} />
-            Loading database stats {dbStatsProgress.loaded}/{dbStatsProgress.total}
+            Loading database stats {effectiveProgress.loaded}/{effectiveProgress.total}
           </div>
         )}
 
@@ -361,7 +383,8 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
           {!collapsedSections.databases && (
               <div className="space-y-1">
                 {databases.map((db) => {
-                  const rawStats = Object.prototype.hasOwnProperty.call(dbStats, db.name) ? dbStats[db.name] : null;
+                  const rawStats = Object.prototype.hasOwnProperty.call(effectiveStats, db.name) ? effectiveStats[db.name] : null;
+                  const freshnessEntry = hasSharedMetadata ? (sharedFreshness[db.name] || null) : null;
                   const hasStats = Boolean(rawStats && !rawStats._error);
                   const hasStatsError = Boolean(rawStats && rawStats._error);
                   const stats = hasStats ? rawStats : null;
@@ -376,6 +399,7 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
                           {typeof stats?.collections === 'number' ? formatNumber(stats.collections) : '-'} cols
                           {' | '}
                           {typeof stats?.objects === 'number' ? formatNumber(stats.objects) : '-'} docs
+                          {freshnessEntry && freshnessEntry.fresh === false ? ' | stale' : ''}
                         </span>
                       ) : hasStatsError ? (
                         <span className="text-2xs" style={{ color:'var(--text-tertiary)' }}>
@@ -435,6 +459,22 @@ export default function WelcomePanel({ databases, connectionInfo, refreshToken =
           </div>
         )}
       </div>
+      {showScrollTop && (
+        <button
+          type="button"
+          className="fixed bottom-5 z-[110] btn-ghost px-3 py-2 text-xs flex items-center gap-1.5"
+          style={{
+            right: 'calc(var(--workspace-right-sidebar-width, 0px) + 16px)',
+            background:'var(--surface-2)',
+            border:'1px solid var(--border)',
+          }}
+          onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+          title="Back to top"
+        >
+          <ArrowUp className="w-3.5 h-3.5" />
+          Top
+        </button>
+      )}
     </div>
   );
 }

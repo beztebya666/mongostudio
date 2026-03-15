@@ -1,14 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import api from '../utils/api';
-import { Save, X, AlertCircle, Check, Loader, Upload } from './Icons';
+import { Save, X, Loader, Upload } from './Icons';
+import ToastNotice from './ToastNotice';
+import ConfirmDialog from './modals/ConfirmDialog';
+import { genId } from '../utils/genId';
 
 export default function DocumentEditor({ db, collection, document, onSave, onCancel }) {
   const isInsert = !document;
   const [value, setValue] = useState('');
   const [error, setError] = useState(null);
   const [info, setInfo] = useState(null);
+  const [toasts, setToasts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [lineCount, setLineCount] = useState(1);
+  const [bulkInsertConfirm, setBulkInsertConfirm] = useState(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -26,6 +31,24 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
     setLineCount(value.split('\n').length);
   }, [value]);
 
+  const pushToast = (kind, message) => {
+    if (!message) return;
+    const id = genId();
+    setToasts((prev) => [...prev, { id, kind, message: String(message) }].slice(-4));
+  };
+
+  useEffect(() => {
+    if (!error) return;
+    pushToast('error', error);
+    setError(null);
+  }, [error]);
+
+  useEffect(() => {
+    if (!info) return;
+    pushToast('success', info);
+    setInfo(null);
+  }, [info]);
+
   const handleSave = async () => {
     setError(null);
     setInfo(null);
@@ -37,7 +60,24 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
     try {
       if (isInsert) {
         if (Array.isArray(parsed)) {
-          const result = await api.insertDocuments(db, collection, parsed);
+          const docsCount = parsed.length;
+          const payloadBytes = new Blob([JSON.stringify(parsed)]).size;
+          if (docsCount > 500 || payloadBytes > 8 * 1024 * 1024) {
+            const preflight = await api.preflight(db, collection, {
+              operation: 'import',
+              documentsCount: docsCount,
+            }).catch(() => null);
+            const risk = preflight?.risk || (docsCount > 50000 ? 'high' : docsCount > 5000 ? 'medium' : 'low');
+            setBulkInsertConfirm({
+              docs: parsed,
+              docsCount,
+              payloadMB: (payloadBytes / (1024 * 1024)).toFixed(2),
+              risk,
+            });
+            setSaving(false);
+            return;
+          }
+          const result = await api.insertDocuments(db, collection, parsed, { heavyConfirm: true });
           setInfo(`Inserted ${result.insertedCount || parsed.length} documents.`);
         } else if (parsed && typeof parsed === 'object') {
           await api.insertDocument(db, collection, parsed);
@@ -90,17 +130,39 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
         setError('File must contain a JSON object or array.');
         return;
       }
+      if (!isInsert && Array.isArray(parsed)) {
+        setError('Update requires a single JSON object. Array payload is not allowed.');
+        return;
+      }
       setValue(JSON.stringify(parsed, null, 2));
       setError(null);
       if (Array.isArray(parsed)) {
         setInfo(`Loaded ${parsed.length} documents from file. Click Insert to import all.`);
       } else {
-        setInfo('Loaded document from file.');
+        setInfo(isInsert ? 'Loaded document from file.' : 'Loaded update payload from file.');
       }
     } catch (e) {
       setError(`Invalid JSON file: ${e.message}`);
     } finally {
       if (event.target) event.target.value = '';
+    }
+  };
+
+  const handleConfirmBulkInsert = async () => {
+    const pending = bulkInsertConfirm;
+    if (!pending || !Array.isArray(pending.docs)) return;
+    setBulkInsertConfirm(null);
+    setSaving(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const result = await api.insertDocuments(db, collection, pending.docs, { heavyConfirm: true });
+      setInfo(`Inserted ${result.insertedCount || pending.docs.length} documents.`);
+      onSave?.();
+    } catch (err) {
+      setError(err?.message || 'Bulk insert failed.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -110,7 +172,7 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
       <div className="flex-shrink-0 flex items-center justify-between px-4 py-2.5" style={{borderBottom:'1px solid var(--border)',background:'var(--surface-1)'}}>
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-semibold" style={{color:'var(--text-primary)'}}>
-            {isInsert ? 'Insert Document' : 'Edit Document'}
+            {isInsert ? 'Insert Document(s)' : 'Edit Document'}
           </h3>
           {!isInsert && document?._id && (
             <code className="text-2xs font-mono px-2 py-0.5 rounded" style={{background:'var(--surface-3)',color:'var(--json-objectid)'}}>
@@ -119,20 +181,16 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
           )}
         </div>
         <div className="flex items-center gap-2">
-          {isInsert && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,application/json,text/json,.txt"
-                className="hidden"
-                onChange={handleLoadFromFile}
-              />
-              <button onClick={() => fileInputRef.current?.click()} className="btn-ghost text-xs flex items-center gap-1.5">
-                <Upload className="w-3.5 h-3.5" />From File
-              </button>
-            </>
-          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json,text/json,.txt"
+            className="hidden"
+            onChange={handleLoadFromFile}
+          />
+          <button onClick={() => fileInputRef.current?.click()} className="btn-ghost text-xs flex items-center gap-1.5">
+            <Upload className="w-3.5 h-3.5" />From File
+          </button>
           <button onClick={handleFormat} className="btn-ghost text-xs">Format</button>
           <span className="text-2xs" style={{color:'var(--text-tertiary)'}}>⌘+S to save</span>
           <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-1.5">
@@ -143,14 +201,20 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
         </div>
       </div>
 
-      {error && (
-        <div className="mx-4 mt-3 flex items-start gap-2 text-red-400 text-xs p-3 rounded-lg" style={{background:'rgba(239,68,68,0.05)',border:'1px solid rgba(239,68,68,0.2)'}}>
-          <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /><span>{error}</span>
-        </div>
-      )}
-      {info && (
-        <div className="mx-4 mt-3 flex items-start gap-2 text-emerald-400 text-xs p-3 rounded-lg" style={{background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.3)'}}>
-          <Check className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /><span>{info}</span>
+      {toasts.length > 0 && (
+        <div
+          className="fixed z-[320] w-[min(92vw,380px)] flex flex-col gap-2 pointer-events-none"
+          style={{ top: 'calc(var(--workspace-header-bottom, 56px) + var(--workspace-collection-toolbar-height, 0px) + 8px)', right: 'calc(var(--workspace-right-sidebar-width, 48px) + 8px)' }}
+        >
+          {toasts.map((toast) => (
+            <ToastNotice
+              key={toast.id}
+              kind={toast.kind}
+              message={toast.message}
+              durationMs={5000}
+              onClose={() => setToasts((prev) => prev.filter((item) => item.id !== toast.id))}
+            />
+          ))}
         </div>
       )}
 
@@ -167,6 +231,19 @@ export default function DocumentEditor({ db, collection, document, onSave, onCan
           className="flex-1 resize-none px-4 py-3 font-mono text-sm leading-relaxed focus:outline-none"
           style={{background:'var(--surface-0)',color:'var(--text-primary)',tabSize:2}} />
       </div>
+      <ConfirmDialog
+        open={Boolean(bulkInsertConfirm)}
+        title="Large Bulk Insert"
+        message={bulkInsertConfirm
+          ? `Large bulk insert detected.\nDocuments: ${bulkInsertConfirm.docsCount}\nPayload: ${bulkInsertConfirm.payloadMB} MB\nRisk: ${bulkInsertConfirm.risk}\n\nContinue?`
+          : 'Continue?'}
+        confirmLabel="Insert"
+        cancelLabel="Cancel"
+        danger={String(bulkInsertConfirm?.risk || '').toLowerCase() === 'high' || String(bulkInsertConfirm?.risk || '').toLowerCase() === 'critical'}
+        busy={saving}
+        onCancel={() => setBulkInsertConfirm(null)}
+        onConfirm={handleConfirmBulkInsert}
+      />
     </div>
   );
 }

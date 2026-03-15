@@ -49,3 +49,25 @@ export function getTypeBadge(val) {
   if (val && typeof val === 'object' && val.$date) return 'Date';
   return typeof val;
 }
+
+export function copyToClipboard(text) {
+  if (!text && text !== '') return Promise.resolve(false);
+  const str = typeof text === 'string' ? text : String(text);
+  if (navigator?.clipboard?.writeText) {
+    return navigator.clipboard.writeText(str).then(() => true).catch(() => fallbackCopy(str));
+  }
+  return Promise.resolve(fallbackCopy(str));
+}
+
+function fallbackCopy(str) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = str;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}

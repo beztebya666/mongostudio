@@ -20,7 +20,7 @@ export default function ConfirmDialog({
         <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</h3>
       </div>
       <div className="px-5 py-4">
-        <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{message}</p>
+        <p className="text-xs leading-relaxed whitespace-pre-line" style={{ color: 'var(--text-secondary)' }}>{message}</p>
       </div>
       <div className="px-5 py-4 flex items-center justify-end gap-2" style={{ borderTop: '1px solid var(--border)' }}>
         <button type="button" onClick={onCancel} className="btn-ghost text-xs" disabled={busy}>{cancelLabel}</button>
